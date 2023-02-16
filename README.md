@@ -1,1 +1,2 @@
-# P6
+# Introduction
+We are a group on AAU working on drug repurposing
