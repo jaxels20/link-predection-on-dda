@@ -19,17 +19,17 @@ def bfs(graph, start, depth=1):
             depth -= 1
     return visited
     
-""" 
-visited_nodes = bfs(G, "Cellular or Molecular Interactions [MoA]", depth=1)
+def draw_subgraph(G, start, depth=1):
+    visited_nodes = bfs(G, start, depth=depth)
 
-subgraph = G.subgraph(visited_nodes)
+    subgraph = G.subgraph(visited_nodes)
 
-pos = nx.circular_layout(subgraph)
-nx.draw_networkx_nodes(subgraph, pos, nodelist=subgraph, node_color='r', node_size=500, alpha=0.8)
-nx.draw_networkx_edges(subgraph, pos, width=1.0, alpha=0.5)
-nx.draw_networkx_labels(subgraph, pos, font_size=10, font_family='sans-serif')
-nx.draw_networkx_edge_labels(subgraph, pos, edge_labels=nx.get_edge_attributes(subgraph, "association_type"), font_size=8, font_family='sans-serif')
- """
+    pos = nx.circular_layout(subgraph)
+    nx.draw_networkx_nodes(subgraph, pos, nodelist=subgraph, node_color='r', node_size=500, alpha=0.8)
+    nx.draw_networkx_edges(subgraph, pos, width=1.0, alpha=0.5)
+    nx.draw_networkx_labels(subgraph, pos, font_size=10, font_family='sans-serif')
+    nx.draw_networkx_edge_labels(subgraph, pos, edge_labels=nx.get_edge_attributes(subgraph, "association_type"), font_size=8, font_family='sans-serif')
+    plt.show()
 
 def get_networkx_graph(remove_self_loops=False, remove_isolated_nodes=False):
 
@@ -106,11 +106,7 @@ def get_networkx_graph(remove_self_loops=False, remove_isolated_nodes=False):
 
 if __name__ == "__main__":
     G = get_networkx_graph(remove_self_loops=True, remove_isolated_nodes=True)
-
-
-
-
-
-
+    draw_subgraph(G, "Cellular or Molecular Interactions [MoA]", depth=1)
+    
 
 
