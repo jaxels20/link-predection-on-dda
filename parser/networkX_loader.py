@@ -32,19 +32,11 @@ def set_edge_attrib(edge):
     edge_attributes["from_code"] = edge.find("from_code").text
     edge_attributes["to_code"] = edge.find("to_code").text
 
-        return edge_attributes
+    return edge_attributes
 
 def conditionally_add_node(G, node, node_attributes):
     if G.has_node(node) == False:
         G.add_node(node, **node_attributes)
-    # draw relations with name = ...
-    subgraph = nx.DiGraph([(u, v, d) for u, v, d in subgraph.edges(data=True) if d['association_type'] == "Parent Of"])
-    pos = nx.circular_layout(subgraph)
-    nx.draw_networkx_nodes(subgraph, pos, nodelist=subgraph, node_color='r', node_size=500, alpha=0.8)
-    nx.draw_networkx_edges(subgraph, pos, width=1.0, alpha=0.5)
-    nx.draw_networkx_labels(subgraph, pos, font_size=10, font_family='sans-serif')
-    nx.draw_networkx_edge_labels(subgraph, pos, edge_labels=nx.get_edge_attributes(subgraph, "association_type"), font_size=8, font_family='sans-serif')
-    plt.show()
 
 def get_networkx_graph(remove_self_loops=False, remove_isolated_nodes=False, bipartite=False):
 
