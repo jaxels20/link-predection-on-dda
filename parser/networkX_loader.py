@@ -24,6 +24,8 @@ def draw_subgraph(G, start, depth=1):
 
     subgraph = G.subgraph(visited_nodes)
 
+    # draw relations with name = ...
+    subgraph = nx.DiGraph([(u, v, d) for u, v, d in subgraph.edges(data=True) if d['association_type'] == "Parent Of"])
     pos = nx.circular_layout(subgraph)
     nx.draw_networkx_nodes(subgraph, pos, nodelist=subgraph, node_color='r', node_size=500, alpha=0.8)
     nx.draw_networkx_edges(subgraph, pos, width=1.0, alpha=0.5)
@@ -106,7 +108,7 @@ def get_networkx_graph(remove_self_loops=False, remove_isolated_nodes=False):
 
 if __name__ == "__main__":
     G = get_networkx_graph(remove_self_loops=True, remove_isolated_nodes=True)
-    draw_subgraph(G, "Cellular or Molecular Interactions [MoA]", depth=1)
+    draw_subgraph(G,"hepatitis B immune globulin", depth=4)
     
 
 
