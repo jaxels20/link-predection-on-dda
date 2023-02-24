@@ -70,14 +70,19 @@ def get_networkx_graph(remove_self_loops=False, remove_isolated_nodes=False, bip
             from_node_attributes = {}
             to_node_attributes = {}
 
-            from_node = edge.find("from_name").text
-            to_node = edge.find("to_name").text
+            from_node = edge.find("from_name").text + "_" + edge.find("from_code").text
+            to_node = edge.find("to_name").text + "_" + edge.find("to_code").text
 
             edge_attributes = set_edge_attrib(edge)
 
             if edge_attributes["association_type"] == "may_treat" or edge_attributes["association_type"] == "may_prevent":
                 from_node_attributes["type"] = "drug"
                 to_node_attributes["type"] = "disease"
+
+                # set a dummy attribute for the now can be removed later
+
+                from_node_attributes["dummy"] = [1]
+                to_node_attributes["dummy"] = [0]
             
 
                 # add the nodes with their attribute
