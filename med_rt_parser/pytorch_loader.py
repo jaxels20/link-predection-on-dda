@@ -5,7 +5,7 @@ from med_rt_parser.networkX_loader import get_networkx_graph
 import networkx as nx
 
 def get_pyg(bipartite=True):
-        # Load the graph
+    # Load the graph
     nx_graph = get_networkx_graph(bipartite=True)
 
     drug_nodes = [node for node in nx_graph.nodes if nx_graph.nodes[node]["type"] == "drug"]
@@ -19,8 +19,10 @@ def get_pyg(bipartite=True):
     data["drug"].node_id = torch.arange(len(drug_nodes))
     data["disease"].node_id = torch.arange(len(disease_nodes))
 
-    data["drug"].x = torch.zeros(len(drug_nodes), 1)
-    data["disease"].x = torch.ones(len(disease_nodes), 1)
+
+    # this is where to add the features (important that they are the same size and numerical)
+    data["drug"].x = torch.zeros(len(drug_nodes), 10)
+    data["disease"].x = torch.ones(len(disease_nodes), 10)
 
 
 
