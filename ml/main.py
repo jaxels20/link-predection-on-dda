@@ -1,68 +1,88 @@
 import sys
 import networkx as nx
 sys.path.append("..")
-from torch_geometric.utils.convert import from_networkx, to_networkx
 from torch_geometric.data import HeteroData
 import torch 
 from med_rt_parser.pytorch_loader import get_pyg
 import torch_geometric.transforms as T
 from torch_geometric.loader import LinkNeighborLoader
-from torch_geometric.nn import SAGEConv, to_hetero
+from torch_geometric.nn import SAGEConv, to_hetero, GATv2Conv
 import torch.nn.functional as F
 import tqdm
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score, recall_score, accuracy_score, f1_score, precision_score
+import numpy as np
+import pandas as pd
+import csv
+import json
+from datetime import datetime
 
+HIDDEN_CHANNELS = 256
+EPOCHS = 5
+LEARNING_RATE = 0.001
+NUM_VAL = 0.1
+NUM_TEST = 0.2
+DISJOINT_TRAIN_RATIO = 0.3
+NEG_SAMPLING_RATIO = 2.0
+ADD_NEGATIVE_TRAIN_SAMPLES = True
+BATCH_SIZE = 128
+NUM_NEIGHBORS = [20, 10]
+SHUFFLE = True
+NUM_HEADS = 4
+AGGR = 'max'
+DROPOUT = 0.1
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-
-
-
-pyg = get_pyg()
-
-pyg = T.ToUndirected()(pyg)
 
 transform = T.RandomLinkSplit(
-    num_val=0.1,
-    num_test=0.2,
-    disjoint_train_ratio=0.3,
-    neg_sampling_ratio=2.0,
-    add_negative_train_samples=False,
+    num_val=NUM_VAL,
+    num_test=NUM_TEST,
+    disjoint_train_ratio=DISJOINT_TRAIN_RATIO,
+    neg_sampling_ratio=NEG_SAMPLING_RATIO,
+    add_negative_train_samples=ADD_NEGATIVE_TRAIN_SAMPLES,
     edge_types=("drug", "may_treat", "disease"),
     rev_edge_types=("disease", "rev_may_treat", "drug"), 
 )
-train_data, val_data, test_data = transform(pyg)
 
-# Define seed edges:
-edge_label_index = train_data["drug", "may_treat", "disease"].edge_label_index
-edge_label = train_data["drug", "may_treat", "disease"].edge_label
+    # Define seed edges:
+    
+def get_train_loader(train_data):
+    edge_label_index = train_data["drug", "may_treat", "disease"].edge_label_index
+    edge_label = train_data["drug", "may_treat", "disease"].edge_label
 
-train_loader = LinkNeighborLoader(
-    data=train_data,
-    num_neighbors=[10, 10],
-    neg_sampling_ratio=2.0,
-    edge_label_index=(("drug", "may_treat", "disease"), edge_label_index),
-    edge_label=edge_label,
-    batch_size=128,
-    shuffle=True,
-)
 
+    train_loader = LinkNeighborLoader(
+        data=train_data,
+        num_neighbors=NUM_NEIGHBORS,
+        neg_sampling_ratio=NEG_SAMPLING_RATIO,
+        edge_label_index=(("drug", "may_treat", "disease"), edge_label_index),
+        edge_label=edge_label,
+        batch_size=BATCH_SIZE,
+        shuffle=SHUFFLE,
+    )
+    return train_loader
 
 class GNN(torch.nn.Module):
     def __init__(self, hidden_channels):
         super().__init__()
-        self.conv1 = SAGEConv(hidden_channels, hidden_channels)
-        self.conv2 = SAGEConv(hidden_channels, hidden_channels)
-        self.conv3 = SAGEConv(hidden_channels, hidden_channels)
-        self.conv4 = SAGEConv(hidden_channels, hidden_channels)
+        self.conv1 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
+        self.conv2 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
+        self.gat = GATv2Conv(hidden_channels, hidden_channels, heads=NUM_HEADS, add_self_loops=False)
+        self.lin_gat = torch.nn.Linear(hidden_channels * NUM_HEADS, hidden_channels)
+        self.dropout = torch.nn.Dropout(p=DROPOUT)
+        self.conv3 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
+        self.conv4 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
+        self.act = F.leaky_relu
 
     def forward(self, x, edge_index):
-        x = F.relu(self.conv1(x, edge_index))
-        x = F.relu(self.conv2(x, edge_index))
-        x = F.relu(self.conv3(x, edge_index))
+        x = self.act(self.conv1(x, edge_index))
+        x = self.act(self.conv2(x, edge_index))
+        x_gat = self.act(self.gat(x, edge_index))
+        x_gat = self.lin_gat(x_gat.view(x_gat.size(0), -1))
+        x = self.dropout(x_gat)
+        x = self.act(self.conv3(x_gat, edge_index))
         x = self.conv4(x, edge_index)
         return x
 
-# Our final classifier applies the dot-product between source and destination
-# node embeddings to derive edge-level predictions:
 class Classifier(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -73,26 +93,21 @@ class Classifier(torch.nn.Module):
         self.fc2 = torch.nn.Linear(256, 128)
         self.fc3 = torch.nn.Linear(128, 64)
         self.fc4 = torch.nn.Linear(64, 1)
-
-
-
+        self.act = F.leaky_relu
 
     def forward(self, x_drug, x_disease, edge_label_index):
         """
         This is the link prediction model. It takes in the node embeddings and the edge indices
         """
-
-
-
         # Convert node embeddings to edge-level representations:
         edge_feat_drug = x_drug[edge_label_index[0]]
         edge_feat_disease = x_disease[edge_label_index[1]]
 
         # Apply MLP to get a prediction per supervision edge:
         edge_feat = torch.cat([edge_feat_drug, edge_feat_disease], dim=-1)
-        edge_feat = F.relu(self.fc1(edge_feat))
-        edge_feat = F.relu(self.fc2(edge_feat))
-        edge_feat = F.relu(self.fc3(edge_feat))
+        edge_feat = self.act(self.fc1(edge_feat))
+        edge_feat = self.act(self.fc2(edge_feat))
+        edge_feat = self.act(self.fc3(edge_feat))
         edge_feat = self.fc4(edge_feat)
         
         # convert the tensor to a 1D array
@@ -100,7 +115,6 @@ class Classifier(torch.nn.Module):
         edge_feat = edge_feat.squeeze()
 
         return edge_feat
-
 
 class Model(torch.nn.Module):
     def __init__(self, hidden_channels):
@@ -133,63 +147,132 @@ class Model(torch.nn.Module):
         )
         
         return pred
+
+def train_model(model, train_loader):
+    model = model.to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    for epoch in range(1, EPOCHS):
+        total_loss = total_examples = 0
+        for sampled_data in tqdm.tqdm(train_loader):
+            optimizer.zero_grad()
+            sampled_data.to(device)
+            """ Calls the forward function of the model """
+            pred = model(sampled_data)
+            ground_truth = sampled_data["drug", "may_treat", "disease"].edge_label
+            loss = F.binary_cross_entropy_with_logits(pred, ground_truth)
+            loss.backward()
+            optimizer.step()
+            total_loss += float(loss) * pred.numel()
+            total_examples += pred.numel()
+        print(f"Epoch: {epoch:03d}, Loss: {total_loss / total_examples:.4f}")
+
+def evaluate_model(model, data):
+    # Define the validation seed edges:
+    edge_label_index = data["drug", "may_treat", "disease"].edge_label_index
+    edge_label = data["drug", "may_treat", "disease"].edge_label
+    val_loader = LinkNeighborLoader(
+        data=data,
+        num_neighbors=[20, 10],
+        edge_label_index=(("drug", "may_treat", "disease"), edge_label_index),
+        edge_label=edge_label,
+        batch_size=128,
+        shuffle=False,
+    )
+    sampled_data = next(iter(val_loader))
+
+    preds = []
+    ground_truths = []
+    for sampled_data in tqdm.tqdm(val_loader):
+        with torch.no_grad():
+            sampled_data.to(device)
+            preds.append(model(sampled_data))
+            ground_truths.append(sampled_data["drug", "may_treat", "disease"].edge_label)
+
+    pred = torch.cat(preds, dim=0).cpu().numpy()
+    ground_truth = torch.cat(ground_truths, dim=0).cpu().numpy()
+
+    # Calculate AUC
+    auc = roc_auc_score(ground_truth, pred)
+    print(f"Validation AUC: {auc:.4f}")
+
+    # Calculate recall
+    threshold = 0.5
+    pred_binary = np.where(pred > threshold, 1, 0)
+    recall = recall_score(ground_truth, pred_binary)
+    print(f"Validation Recall: {recall:.4f}")
+
+    # Calculate accuracy
+    accuracy = accuracy_score(ground_truth, pred_binary)
+    print(f"Validation Accuracy: {accuracy:.4f}")
+
+    # Calculate f1 score
+    f1 = f1_score(ground_truth, pred_binary)
+    print(f"Validation F1: {f1:.4f}")
+
+    # Calculate precision
+    precision = precision_score(ground_truth, pred_binary)
+    print(f"Validation Precision: {precision:.4f}")
+
+    return auc, recall, accuracy, f1, precision
+
+def get_id():
+    try:
+        with open('model_results.csv', 'r') as f:
+            reader = csv.reader(f)
+            last_id = list(reader)[-1][0]
+        return int(last_id) + 1
+    except:
+        return 1
+
+def append_model_results_to_csv(ID, auc, recall, accuracy, f1, precision):
+    with open('model_results.csv', 'a') as f:
+        writer = csv.writer(f)
+        writer.writerow([ID, auc, recall, accuracy, f1, precision])
+    
+def export_model_configuration(ID):
+    gnn_config = {str(name): str(value) for name, value in model.gnn.named_children()}
+    classifier_config = {str(name): str(value) for name, value in model.classifier.named_children()}
+
+    model_config = {
+        "ID": ID,
+        "TIMESTAMP": str(datetime.now()),
+        "EPOCHS": EPOCHS,
+        "LEARNING_RATE": LEARNING_RATE,
+        "HIDDEN_CHANNELS": HIDDEN_CHANNELS,
+        "NUM_VAL": NUM_VAL,
+        "NUM_TEST": NUM_TEST,
+        "DISJOINT_TRAIN_RATIO": DISJOINT_TRAIN_RATIO,
+        "NEG_SAMPLING_RATIO": NEG_SAMPLING_RATIO,
+        "ADD_NEGATIVE_TRAIN_SAMPLES": ADD_NEGATIVE_TRAIN_SAMPLES,
+        "BATCH_SIZE": BATCH_SIZE,
+        "NUM_NEIGHBORS": NUM_NEIGHBORS,
+        "SHUFFLE": SHUFFLE,
+        "NUM_HEADS": NUM_HEADS,
+        "AGGR": AGGR,
+        "DROPOUT": DROPOUT,
+        "gnn_config": gnn_config,
+        "classifier_config": classifier_config
         
-model = Model(hidden_channels=256)   
-
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = model.to(device)
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-for epoch in range(1, 6):
-    total_loss = total_examples = 0
-    for sampled_data in tqdm.tqdm(train_loader):
-        print(sampled_data)
-        optimizer.zero_grad()
-        sampled_data.to(device)
-        pred = model(sampled_data)
-        ground_truth = sampled_data["drug", "may_treat", "disease"].edge_label
-        loss = F.binary_cross_entropy_with_logits(pred, ground_truth)
-        loss.backward()
-        optimizer.step()
-        total_loss += float(loss) * pred.numel()
-        total_examples += pred.numel()
-    print(f"Epoch: {epoch:03d}, Loss: {total_loss / total_examples:.4f}")
+    }
+    with open("models_json/model_{}.json".format(ID), "w") as f:
+        json.dump(model_config, f, indent=4)
 
 
+if __name__ == "__main__":
+    pyg = get_pyg()
 
-# Define the validation seed edges:
-edge_label_index = val_data["drug", "may_treat", "disease"].edge_label_index
-edge_label = val_data["drug", "may_treat", "disease"].edge_label
-val_loader = LinkNeighborLoader(
-    data=val_data,
-    num_neighbors=[20, 10],
-    edge_label_index=(("drug", "may_treat", "disease"), edge_label_index),
-    edge_label=edge_label,
-    batch_size=3 * 128,
-    shuffle=False,
-)
-sampled_data = next(iter(val_loader))
+    train_data, val_data, test_data = transform(pyg)
 
-preds = []
-ground_truths = []
-for sampled_data in tqdm.tqdm(val_loader):
-    with torch.no_grad():
-        sampled_data.to(device)
-        preds.append(model(sampled_data))
-        ground_truths.append(sampled_data["drug", "may_treat", "disease"].edge_label)
-pred = torch.cat(preds, dim=0).cpu().numpy()
-ground_truth = torch.cat(ground_truths, dim=0).cpu().numpy()
-auc = roc_auc_score(ground_truth, pred)
-print()
-print(f"Validation AUC: {auc:.4f}")
+    train_loader = get_train_loader(train_data)
 
+    model = Model(hidden_channels=HIDDEN_CHANNELS)
+    train_model(model, train_loader)
 
+    auc, recall, accuracy, f1, precision = evaluate_model(model, test_data)
 
-
-
-
-
-
-
+    ID = get_id()
+    append_model_results_to_csv(ID, auc, recall, accuracy, f1, precision)
+    export_model_configuration(ID)
 
 
 

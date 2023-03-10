@@ -3,6 +3,7 @@ import torch_geometric as pyg
 from torch_geometric.data import HeteroData
 from med_rt_parser.networkX_loader import get_networkx_graph
 import networkx as nx
+import torch_geometric.transforms as T
 
 def get_pyg(bipartite=True):
     # Load the graph
@@ -33,7 +34,7 @@ def get_pyg(bipartite=True):
         except:
             data["drug", str(edge_attributes[edge]), "disease"].edge_index = (torch.tensor([[drug_nodes.index(edge[0])], [disease_nodes.index(edge[1])]]))
     
-    return data
+    return T.ToUndirected()(data)
 
 
 

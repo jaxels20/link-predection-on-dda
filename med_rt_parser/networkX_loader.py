@@ -75,15 +75,9 @@ def get_networkx_graph(remove_self_loops=False, remove_isolated_nodes=False, bip
 
             edge_attributes = set_edge_attrib(edge)
 
-            if edge_attributes["association_type"] == "may_treat" or edge_attributes["association_type"] == "may_prevent":
+            if edge_attributes["association_type"] == "may_treat":
                 from_node_attributes["type"] = "drug"
                 to_node_attributes["type"] = "disease"
-
-                # set a dummy attribute for the now can be removed later
-
-                from_node_attributes["dummy"] = [1]
-                to_node_attributes["dummy"] = [0]
-            
 
                 # add the nodes with their attribute
                 
