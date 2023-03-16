@@ -23,15 +23,14 @@ NUM_VAL = 0.1
 NUM_TEST = 0.2
 DISJOINT_TRAIN_RATIO = 0.3
 NEG_SAMPLING_RATIO = 2.0
-ADD_NEGATIVE_TRAIN_SAMPLES = True
+ADD_NEGATIVE_TRAIN_SAMPLES = False
 BATCH_SIZE = 128
 NUM_NEIGHBORS = [20, 10]
 SHUFFLE = True
-NUM_HEADS = 4
-AGGR = 'max'
-DROPOUT = 0.1
+NUM_HEADS = None
+AGGR = 'mean'
+DROPOUT = None
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
 
 transform = T.RandomLinkSplit(
     num_val=NUM_VAL,
@@ -43,8 +42,6 @@ transform = T.RandomLinkSplit(
     rev_edge_types=("disease", "rev_may_treat", "drug"), 
 )
 
-    # Define seed edges:
-    
 def get_train_loader(train_data):
     edge_label_index = train_data["drug", "may_treat", "disease"].edge_label_index
     edge_label = train_data["drug", "may_treat", "disease"].edge_label
@@ -61,26 +58,37 @@ def get_train_loader(train_data):
     )
     return train_loader
 
+def get_val_loader(val_data):
+    edge_label_index = val_data["drug", "may_treat", "disease"].edge_label_index
+    edge_label = val_data["drug", "may_treat", "disease"].edge_label
+
+    val_loader = LinkNeighborLoader(
+        data=val_data,
+        num_neighbors=NUM_NEIGHBORS,
+        neg_sampling_ratio=NEG_SAMPLING_RATIO,
+        edge_label_index=(("drug", "may_treat", "disease"), edge_label_index),
+        edge_label=edge_label,
+        batch_size=BATCH_SIZE,
+        shuffle=SHUFFLE,
+    )
+    return val_loader
+
 class GNN(torch.nn.Module):
     def __init__(self, hidden_channels):
         super().__init__()
         self.conv1 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
         self.conv2 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
-        self.gat = GATv2Conv(hidden_channels, hidden_channels, heads=NUM_HEADS, add_self_loops=False)
-        self.lin_gat = torch.nn.Linear(hidden_channels * NUM_HEADS, hidden_channels)
-        self.dropout = torch.nn.Dropout(p=DROPOUT)
         self.conv3 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
         self.conv4 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
+        self.conv5 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
+        self.conv6 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
+
         self.act = F.leaky_relu
 
     def forward(self, x, edge_index):
         x = self.act(self.conv1(x, edge_index))
         x = self.act(self.conv2(x, edge_index))
-        x_gat = self.act(self.gat(x, edge_index))
-        x_gat = self.lin_gat(x_gat.view(x_gat.size(0), -1))
-        x = self.dropout(x_gat)
-        x = self.act(self.conv3(x_gat, edge_index))
-        x = self.conv4(x, edge_index)
+        x = self.conv6(x, edge_index)
         return x
 
 class Classifier(torch.nn.Module):
@@ -165,6 +173,50 @@ def train_model(model, train_loader):
             total_loss += float(loss) * pred.numel()
             total_examples += pred.numel()
         print(f"Epoch: {epoch:03d}, Loss: {total_loss / total_examples:.4f}")
+
+def early_stopping_train_model(model, train_loader, val_loader, early_stop_patience=10):
+    model = model.to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    best_val_loss = float('inf')
+    epochs_since_improvement = 0
+    for epoch in range(1, EPOCHS):
+        total_loss = total_examples = 0
+        for sampled_data in tqdm.tqdm(train_loader):
+            optimizer.zero_grad()
+            sampled_data.to(device)
+            """ Calls the forward function of the model """
+            pred = model(sampled_data)
+            ground_truth = sampled_data["drug", "may_treat", "disease"].edge_label
+            loss = F.binary_cross_entropy_with_logits(pred, ground_truth)
+            loss.backward()
+            optimizer.step()
+            total_loss += float(loss) * pred.numel()
+            total_examples += pred.numel()
+        
+        # Compute validation loss
+        val_loss = 0
+        with torch.no_grad():
+            for sampled_data in val_loader:
+                sampled_data.to(device)
+                pred = model(sampled_data)
+                ground_truth = sampled_data["drug", "may_treat", "disease"].edge_label
+                loss = F.binary_cross_entropy_with_logits(pred, ground_truth)
+                val_loss += loss.item() * pred.numel()
+        val_loss /= len(val_loader.dataset)
+        
+        # Check if validation loss has improved
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            epochs_since_improvement = 0
+        else:
+            epochs_since_improvement += 1
+            
+        # Check if we should stop early
+        if epochs_since_improvement >= early_stop_patience:
+            print(f"Early stopping after {epoch} epochs.")
+            break
+        
+        print(f"Epoch: {epoch:03d}, Train Loss: {total_loss / total_examples:.4f}, Val Loss: {val_loss:.4f}")
 
 def evaluate_model(model, data):
     # Define the validation seed edges:
@@ -265,8 +317,10 @@ if __name__ == "__main__":
 
     train_loader = get_train_loader(train_data)
 
+    val_loader = get_val_loader(val_data)
+
     model = Model(hidden_channels=HIDDEN_CHANNELS)
-    train_model(model, train_loader)
+    early_stopping_train_model(model, train_loader, val_loader, early_stop_patience=1)
 
     auc, recall, accuracy, f1, precision = evaluate_model(model, test_data)
 

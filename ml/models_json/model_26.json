@@ -1,0 +1,35 @@
+{
+    "ID": 26,
+    "TIMESTAMP": "2023-03-15 13:34:42.939583",
+    "EPOCHS": 5,
+    "LEARNING_RATE": 0.001,
+    "HIDDEN_CHANNELS": 256,
+    "NUM_VAL": 0.1,
+    "NUM_TEST": 0.2,
+    "DISJOINT_TRAIN_RATIO": 0.3,
+    "NEG_SAMPLING_RATIO": 2.0,
+    "ADD_NEGATIVE_TRAIN_SAMPLES": true,
+    "BATCH_SIZE": 128,
+    "NUM_NEIGHBORS": [
+        20,
+        10
+    ],
+    "SHUFFLE": true,
+    "NUM_HEADS": null,
+    "AGGR": "mean",
+    "DROPOUT": null,
+    "gnn_config": {
+        "conv1": "ModuleDict(\n  (drug__may_treat__disease): SAGEConv(256, 256, aggr=mean)\n  (disease__rev_may_treat__drug): SAGEConv(256, 256, aggr=mean)\n)",
+        "conv2": "ModuleDict(\n  (drug__may_treat__disease): SAGEConv(256, 256, aggr=mean)\n  (disease__rev_may_treat__drug): SAGEConv(256, 256, aggr=mean)\n)",
+        "conv3": "ModuleDict(\n  (drug__may_treat__disease): SAGEConv(256, 256, aggr=mean)\n  (disease__rev_may_treat__drug): SAGEConv(256, 256, aggr=mean)\n)",
+        "conv4": "ModuleDict(\n  (drug__may_treat__disease): SAGEConv(256, 256, aggr=mean)\n  (disease__rev_may_treat__drug): SAGEConv(256, 256, aggr=mean)\n)",
+        "conv5": "ModuleDict(\n  (drug__may_treat__disease): SAGEConv(256, 256, aggr=mean)\n  (disease__rev_may_treat__drug): SAGEConv(256, 256, aggr=mean)\n)",
+        "conv6": "ModuleDict(\n  (drug__may_treat__disease): SAGEConv(256, 256, aggr=mean)\n  (disease__rev_may_treat__drug): SAGEConv(256, 256, aggr=mean)\n)"
+    },
+    "classifier_config": {
+        "fc1": "Linear(in_features=512, out_features=256, bias=True)",
+        "fc2": "Linear(in_features=256, out_features=128, bias=True)",
+        "fc3": "Linear(in_features=128, out_features=64, bias=True)",
+        "fc4": "Linear(in_features=64, out_features=1, bias=True)"
+    }
+}

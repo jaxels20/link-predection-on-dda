@@ -59,6 +59,7 @@ def get_networkx_graph(remove_self_loops=False, remove_isolated_nodes=False, bip
             for prop in element.findall('property'):
                 if prop.find('name').text == "CTY":
                     attributes["type"] = prop.find('value').text
+                    
 
             # add the nodes with their attributes
             G.add_node(node_name, **attributes)
@@ -148,16 +149,7 @@ def get_networkx_graph(remove_self_loops=False, remove_isolated_nodes=False, bip
 if __name__ == "__main__":
     G = get_networkx_graph(remove_self_loops=True, remove_isolated_nodes=True, bipartite=False)
 
-    # get the subgraph with a depth of 2
-    subgraph = bfs(G, "Antirheumatic Agent [EPC]", depth=1)
-    pos = nx.spring_layout(G.subgraph(subgraph))
-
-    print(G.nodes["Antirheumatic Agent [EPC]"]["type"])
-    # draw the subgraph with edge labels and node attributes
-    nx.draw(G.subgraph(subgraph), with_labels=True)
-    nx.draw_networkx_edge_labels(G.subgraph(subgraph), pos=pos, edge_labels=nx.get_edge_attributes(G.subgraph(subgraph), 'association_type'))
-    nx.draw_networkx_labels(G.subgraph(subgraph), pos=pos, labels=nx.get_node_attributes(G.subgraph(subgraph), 'type'))
-    plt.show()
+    print(G.nodes)
 
 
 
