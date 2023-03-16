@@ -320,7 +320,7 @@ if __name__ == "__main__":
     val_loader = get_val_loader(val_data)
 
     model = Model(hidden_channels=HIDDEN_CHANNELS)
-    early_stopping_train_model(model, train_loader, val_loader, early_stop_patience=1)
+    early_stopping_train_model(model, train_loader, val_loader)
 
     auc, recall, accuracy, f1, precision = evaluate_model(model, test_data)
 
