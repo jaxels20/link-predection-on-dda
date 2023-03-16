@@ -30,6 +30,8 @@ SHUFFLE = True
 NUM_HEADS = None
 AGGR = 'mean'
 DROPOUT = None
+EARLY_STOPPING_PATIENCE = 5
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 transform = T.RandomLinkSplit(
@@ -174,7 +176,7 @@ def train_model(model, train_loader):
             total_examples += pred.numel()
         print(f"Epoch: {epoch:03d}, Loss: {total_loss / total_examples:.4f}")
 
-def early_stopping_train_model(model, train_loader, val_loader, early_stop_patience=10):
+def early_stopping_train_model(model, train_loader, val_loader):
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     best_val_loss = float('inf')
@@ -212,7 +214,7 @@ def early_stopping_train_model(model, train_loader, val_loader, early_stop_patie
             epochs_since_improvement += 1
             
         # Check if we should stop early
-        if epochs_since_improvement >= early_stop_patience:
+        if epochs_since_improvement >= EARLY_STOPPING_TOLERANCE:
             print(f"Early stopping after {epoch} epochs.")
             break
         
