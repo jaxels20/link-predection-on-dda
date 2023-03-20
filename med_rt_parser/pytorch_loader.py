@@ -3,6 +3,8 @@ import torch_geometric as pyg
 from torch_geometric.data import HeteroData
 import networkx as nx
 import torch_geometric.transforms as T
+import numpy 
+from torch_geometric.utils import to_undirected
 
 try: 
     from med_rt_parser.networkX_loader import get_networkx_graph
@@ -29,7 +31,11 @@ def get_pyg(bipartite=True):
 
     # Add the nodes
     data["drug"].node_id = torch.arange(len(drug_nodes))
+    data["drug"].node_type = torch.zeros(len(drug_nodes), dtype=torch.long)
+    
     data["disease"].node_id = torch.arange(len(disease_nodes))
+    data["disease"].node_type = torch.ones(len(disease_nodes), dtype=torch.long)
+
     """ 
     data["MoA"].node_id = torch.arange(len(MoA_nodes))
     data["SC"].node_id = torch.arange(len(SC_nodes))
@@ -50,18 +56,44 @@ def get_pyg(bipartite=True):
     # Add the edges
     for edge in nx_graph.edges:
         try:
-            data["drug", str(edge_attributes[edge]), "disease"].edge_index = torch.cat((data["drug", str(edge_attributes[edge]), "disease"].edge_index, torch.tensor([[drug_nodes.index(edge[0])], [disease_nodes.index(edge[1])]])), dim=1)
+            data["drug", str(edge_attributes[edge]), "disease"].edge_index = torch.cat(
+                (data["drug", str(edge_attributes[edge]), "disease"].edge_index, torch.tensor([[drug_nodes.index(edge[0])], [disease_nodes.index(edge[1])]])), 
+                dim=1)
         except:
             data["drug", str(edge_attributes[edge]), "disease"].edge_index = (torch.tensor([[drug_nodes.index(edge[0])], [disease_nodes.index(edge[1])]]))
     
     return T.ToUndirected()(data)
 
+def is_bipartite(pyg):
+    for edge_type in pyg.edge_types:
+        for edge in pyg[edge_type].edge_index.T:
+            from_node = edge[0].item()
+            to_node = edge[1].item()
+            if edge_type == ("drug", "may_treat", "disease"):
+                from_node_type = pyg["drug"]["node_type"][from_node].item()
+                to_node_type = pyg["disease"]["node_type"][to_node].item()
+
+            elif edge_type == ("disease", "rev_may_treat", "drug"):
+                from_node_type = pyg["disease"]["node_type"][from_node].item()
+                to_node_type = pyg["drug"]["node_type"][to_node].item()
+            else:
+                raise ValueError("Edge type not recognized")
+
+            if from_node_type == to_node_type:
+                print("Error: edge between nodes of the same type")
+                return False
+            
+    return True
 
 
 if __name__ == "__main__":
     pyg = get_pyg()
-    print(pyg)
+    
+    print(is_bipartite(pyg))
 
+    
+        
+    
 
 
 

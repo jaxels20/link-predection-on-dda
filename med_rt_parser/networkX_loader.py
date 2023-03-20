@@ -147,9 +147,10 @@ def get_networkx_graph(remove_self_loops=False, remove_isolated_nodes=False, bip
     return G
 
 if __name__ == "__main__":
-    G = get_networkx_graph(remove_self_loops=True, remove_isolated_nodes=True, bipartite=False)
+    G = get_networkx_graph(remove_self_loops=True, remove_isolated_nodes=True, bipartite=True)
 
-    print(G.nodes)
+    bi = nx.bipartite.is_bipartite(G)
+    print(bi)
 
 
 

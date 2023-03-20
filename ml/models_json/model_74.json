@@ -1,0 +1,36 @@
+{
+    "ID": 74,
+    "TIMESTAMP": "2023-03-16 10:58:30.294103",
+    "EPOCHS": 10,
+    "LEARNING_RATE": 0.001,
+    "HIDDEN_CHANNELS": 100,
+    "NUM_VAL": 0.1,
+    "NUM_TEST": 0.2,
+    "DISJOINT_TRAIN_RATIO": 0.3,
+    "NEG_SAMPLING_RATIO": 2.0,
+    "ADD_NEGATIVE_TRAIN_SAMPLES": true,
+    "BATCH_SIZE": 128,
+    "NUM_NEIGHBORS": [
+        20,
+        10
+    ],
+    "SHUFFLE": false,
+    "NUM_HEADS": null,
+    "AGGR": "max",
+    "DROPOUT": null,
+    "gnn_config": {
+        "conv1": "ModuleDict(\n  (drug__may_treat__disease): SAGEConv(100, 100, aggr=max)\n  (disease__rev_may_treat__drug): SAGEConv(100, 100, aggr=max)\n)",
+        "conv2": "ModuleDict(\n  (drug__may_treat__disease): SAGEConv(100, 100, aggr=max)\n  (disease__rev_may_treat__drug): SAGEConv(100, 100, aggr=max)\n)",
+        "conv6": "ModuleDict(\n  (drug__may_treat__disease): SAGEConv(100, 100, aggr=max)\n  (disease__rev_may_treat__drug): SAGEConv(100, 100, aggr=max)\n)",
+        "conv3": "SAGEConv(100, 100, aggr=max)",
+        "conv4": "SAGEConv(100, 100, aggr=max)",
+        "conv5": "SAGEConv(100, 100, aggr=max)"
+    },
+    "classifier_config": {
+        "fc1": "Linear(in_features=200, out_features=128, bias=True)",
+        "fc2": "Linear(in_features=128, out_features=64, bias=True)",
+        "fc3": "Linear(in_features=64, out_features=32, bias=True)",
+        "fc4": "Linear(in_features=32, out_features=8, bias=True)",
+        "fc5": "Linear(in_features=8, out_features=1, bias=True)"
+    }
+}

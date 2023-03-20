@@ -3,10 +3,11 @@ import networkx as nx
 sys.path.append("..")
 from torch_geometric.data import HeteroData
 import torch 
-from med_rt_parser.pytorch_loader import get_pyg
+from med_rt_parser.pytorch_loader import get_pyg, is_bipartite
 import torch_geometric.transforms as T
 from torch_geometric.loader import LinkNeighborLoader
 from torch_geometric.nn import SAGEConv, to_hetero, GATv2Conv
+from torch_geometric.utils import to_undirected
 import torch.nn.functional as F
 import tqdm
 from sklearn.metrics import roc_auc_score, recall_score, accuracy_score, f1_score, precision_score
@@ -15,22 +16,24 @@ import pandas as pd
 import csv
 import json
 from datetime import datetime
+import networkx as nx
 
-HIDDEN_CHANNELS = 256
-EPOCHS = 5
+
+HIDDEN_CHANNELS = 100
+EPOCHS = 10
 LEARNING_RATE = 0.001
 NUM_VAL = 0.1
 NUM_TEST = 0.2
 DISJOINT_TRAIN_RATIO = 0.3
-NEG_SAMPLING_RATIO = 2.0
+NEG_SAMPLING_RATIO = 1.0
 ADD_NEGATIVE_TRAIN_SAMPLES = False
 BATCH_SIZE = 128
 NUM_NEIGHBORS = [20, 10]
-SHUFFLE = True
+SHUFFLE = False
 NUM_HEADS = None
-AGGR = 'mean'
+AGGR = 'max'
 DROPOUT = None
-EARLY_STOPPING_PATIENCE = 5
+EARLY_STOPPING_PATIENCE = 2
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -47,7 +50,6 @@ transform = T.RandomLinkSplit(
 def get_train_loader(train_data):
     edge_label_index = train_data["drug", "may_treat", "disease"].edge_label_index
     edge_label = train_data["drug", "may_treat", "disease"].edge_label
-
 
     train_loader = LinkNeighborLoader(
         data=train_data,
@@ -70,8 +72,9 @@ def get_val_loader(val_data):
         neg_sampling_ratio=NEG_SAMPLING_RATIO,
         edge_label_index=(("drug", "may_treat", "disease"), edge_label_index),
         edge_label=edge_label,
-        batch_size=BATCH_SIZE,
+        batch_size=3 * BATCH_SIZE,
         shuffle=SHUFFLE,
+        neighbor_sampler=None,
     )
     return val_loader
 
@@ -99,10 +102,13 @@ class Classifier(torch.nn.Module):
 
         # create neural network layers
 
-        self.fc1 = torch.nn.Linear(512, 256)
-        self.fc2 = torch.nn.Linear(256, 128)
-        self.fc3 = torch.nn.Linear(128, 64)
-        self.fc4 = torch.nn.Linear(64, 1)
+        self.fc1 = torch.nn.Linear(200, 128)
+        self.fc2 = torch.nn.Linear(128, 64)
+        self.fc3 = torch.nn.Linear(64, 32)
+        self.fc4 = torch.nn.Linear(32, 8)
+        self.fc5 = torch.nn.Linear(8, 1)
+
+
         self.act = F.leaky_relu
 
     def forward(self, x_drug, x_disease, edge_label_index):
@@ -118,7 +124,10 @@ class Classifier(torch.nn.Module):
         edge_feat = self.act(self.fc1(edge_feat))
         edge_feat = self.act(self.fc2(edge_feat))
         edge_feat = self.act(self.fc3(edge_feat))
-        edge_feat = self.fc4(edge_feat)
+        edge_feat = self.act(self.fc4(edge_feat))
+
+        edge_feat = self.fc5(edge_feat)
+
         
         # convert the tensor to a 1D array
 
@@ -214,7 +223,7 @@ def early_stopping_train_model(model, train_loader, val_loader):
             epochs_since_improvement += 1
             
         # Check if we should stop early
-        if epochs_since_improvement >= EARLY_STOPPING_TOLERANCE:
+        if epochs_since_improvement >= EARLY_STOPPING_PATIENCE:
             print(f"Early stopping after {epoch} epochs.")
             break
         
@@ -310,6 +319,7 @@ def export_model_configuration(ID):
     }
     with open("models_json/model_{}.json".format(ID), "w") as f:
         json.dump(model_config, f, indent=4)
+
 
 
 if __name__ == "__main__":
