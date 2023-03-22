@@ -17,10 +17,10 @@ import csv
 import json
 from datetime import datetime
 import networkx as nx
-
+from gan import train_gan
 
 HIDDEN_CHANNELS = 100
-EPOCHS = 10
+EPOCHS = 100
 LEARNING_RATE = 0.001
 NUM_VAL = 0.1
 NUM_TEST = 0.2
@@ -167,22 +167,21 @@ class Model(torch.nn.Module):
         
         return pred
 
-def train_model(model, train_loader):
+def train_model(model, train_data):
     model = model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
     for epoch in range(1, EPOCHS):
         total_loss = total_examples = 0
-        for sampled_data in tqdm.tqdm(train_loader):
-            optimizer.zero_grad()
-            sampled_data.to(device)
-            """ Calls the forward function of the model """
-            pred = model(sampled_data)
-            ground_truth = sampled_data["drug", "may_treat", "disease"].edge_label
-            loss = F.binary_cross_entropy_with_logits(pred, ground_truth)
-            loss.backward()
-            optimizer.step()
-            total_loss += float(loss) * pred.numel()
-            total_examples += pred.numel()
+        optimizer.zero_grad()
+        train_data.to(device)
+        """ Calls the forward function of the model """
+        pred = model(train_data)
+        ground_truth = train_data["drug", "may_treat", "disease"].edge_label
+        loss = F.binary_cross_entropy_with_logits(pred, ground_truth)
+        loss.backward()
+        optimizer.step()
+        total_loss += float(loss) * pred.numel()
+        total_examples += pred.numel()
         print(f"Epoch: {epoch:03d}, Loss: {total_loss / total_examples:.4f}")
 
 def early_stopping_train_model(model, train_loader, val_loader):
@@ -320,6 +319,8 @@ def export_model_configuration(ID):
     with open("models_json/model_{}.json".format(ID), "w") as f:
         json.dump(model_config, f, indent=4)
 
+def add_negative_edges(train_data):
+    pass
 
 
 if __name__ == "__main__":
@@ -327,18 +328,26 @@ if __name__ == "__main__":
 
     train_data, val_data, test_data = transform(pyg)
 
-    train_loader = get_train_loader(train_data)
 
-    val_loader = get_val_loader(val_data)
+    # Hyperparameters
+    num_epochs = 100
+    batch_size = 64
+    lr_G = 0.0001
+    lr_D = 0.0001
+    hidden_dim = 128
+    noise_dim = 128
+    NEG_SAMPLING_RATIO = 1
 
-    model = Model(hidden_channels=HIDDEN_CHANNELS)
-    early_stopping_train_model(model, train_loader, val_loader)
+    gen = train_gan(train_data, num_epochs, batch_size, lr_G, lr_D, hidden_dim, noise_dim, NEG_SAMPLING_RATIO)
+
+    """ model = Model(hidden_channels=HIDDEN_CHANNELS)
+    train_model(model, train_data)
 
     auc, recall, accuracy, f1, precision = evaluate_model(model, test_data)
 
     ID = get_id()
     append_model_results_to_csv(ID, auc, recall, accuracy, f1, precision)
-    export_model_configuration(ID)
+    export_model_configuration(ID) """
 
 
 

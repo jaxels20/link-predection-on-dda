@@ -5,11 +5,9 @@ import networkx as nx
 import torch_geometric.transforms as T
 import numpy 
 from torch_geometric.utils import to_undirected
+ 
+from med_rt_parser.networkX_loader import get_networkx_graph
 
-try: 
-    from med_rt_parser.networkX_loader import get_networkx_graph
-except:
-    from networkX_loader import get_networkx_graph
 
 def get_pyg(bipartite=True):
     # Load the graph
