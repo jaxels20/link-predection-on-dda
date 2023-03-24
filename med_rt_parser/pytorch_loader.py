@@ -13,17 +13,19 @@ except:
 
 def get_pyg(bipartite=True):
     # Load the graph
-    nx_graph = get_networkx_graph(bipartite=True)
-
+    nx_graph = get_networkx_graph(bipartite=False)
 
     drug_nodes = [node for node in nx_graph.nodes if nx_graph.nodes[node]["type"] == "drug"]
     disease_nodes = [node for node in nx_graph.nodes if nx_graph.nodes[node]["type"] == "disease"]
-    """ 
-    MoA_nodes = [node for node in nx_graph.nodes if nx_graph.nodes[node]["type"] == "MoA"]
-    SC_nodes = [node for node in nx_graph.nodes if nx_graph.nodes[node]["type"] == "SC"]
-    PE_nodes = [node for node in nx_graph.nodes if nx_graph.nodes[node]["type"] == "PE"]
-    TC_nodes = [node for node in nx_graph.nodes if nx_graph.nodes[node]["type"] == "TC"] """
     
+    MoA_nodes = [node for node in nx_graph.nodes if nx_graph.nodes[node]["type"] == "MoA"]
+    PE_nodes = [node for node in nx_graph.nodes if nx_graph.nodes[node]["type"] == "PE"]
+    TC_nodes = [node for node in nx_graph.nodes if nx_graph.nodes[node]["type"] == "TC"]
+    EPC_nodes = [node for node in nx_graph.nodes if nx_graph.nodes[node]["type"] == "EPC"]
+    EXT_nodes = [node for node in nx_graph.nodes if nx_graph.nodes[node]["type"] == "EXT"]
+    PK_nodes = [node for node in nx_graph.nodes if nx_graph.nodes[node]["type"] == "PK"]
+    APC_nodes = [node for node in nx_graph.nodes if nx_graph.nodes[node]["type"] == "APC"]
+    HC_nodes = [node for node in nx_graph.nodes if nx_graph.nodes[node]["type"] == "HC"]
 
     edge_attributes = nx.get_edge_attributes(nx_graph, "association_type")
 
@@ -36,32 +38,106 @@ def get_pyg(bipartite=True):
     data["disease"].node_id = torch.arange(len(disease_nodes))
     data["disease"].node_type = torch.ones(len(disease_nodes), dtype=torch.long)
 
-    """ 
+    
     data["MoA"].node_id = torch.arange(len(MoA_nodes))
-    data["SC"].node_id = torch.arange(len(SC_nodes))
     data["PE"].node_id = torch.arange(len(PE_nodes))
-    data["TC"].node_id = torch.arange(len(TC_nodes)) """
+    data["TC"].node_id = torch.arange(len(TC_nodes))
+    data["EPC"].node_id = torch.arange(len(EPC_nodes))
+    data["EXT"].node_id = torch.arange(len(EXT_nodes))
+    data["PK"].node_id = torch.arange(len(PK_nodes))
+    data["APC"].node_id = torch.arange(len(APC_nodes))
+    data["HC"].node_id = torch.arange(len(HC_nodes))
 
 
     # this is where to add the features (important that they are the same size and numerical)
-    data["drug"].x = torch.zeros(len(drug_nodes), 10)
-    data["disease"].x = torch.ones(len(disease_nodes), 10)
-    """ 
-    data["MoA"].x = torch.ones(len(MoA_nodes), 10)
-    data["SC"].x = torch.ones(len(SC_nodes), 10)
-    data["PE"].x = torch.ones(len(PE_nodes), 10)
-    data["TC"].x = torch.ones(len(TC_nodes), 10) """
+    data["drug"].x = torch.tensor([1,0,0,0,0,0,0,0,0,0]).to(torch.float32).repeat(len(drug_nodes), 1)
+    data["disease"].x = torch.tensor([0,1,0,0,0,0,0,0,0,0]).to(torch.float32).repeat(len(disease_nodes), 1)
+
+    data["MoA"].x = torch.tensor([0,0,1,0,0,0,0,0,0,0]).to(torch.float32).repeat(len(MoA_nodes), 1)
+    data["PE"].x = torch.tensor([0,0,0,1,0,0,0,0,0,0]).to(torch.float32).repeat(len(PE_nodes), 1)
+    data["TC"].x = torch.tensor([0,0,0,0,1,0,0,0,0,0]).to(torch.float32).repeat(len(TC_nodes), 1)
+    data["EPC"].x = torch.tensor([0,0,0,0,0,1,0,0,0,0]).to(torch.float32).repeat(len(EPC_nodes), 1)
+    data["EXT"].x = torch.tensor([0,0,0,0,0,0,1,0,0,0]).to(torch.float32).repeat(len(EXT_nodes), 1)
+    data["PK"].x = torch.tensor([0,0,0,0,0,0,0,1,0,0]).to(torch.float32).repeat(len(PK_nodes), 1)
+    data["APC"].x = torch.tensor([0,0,0,0,0,0,0,0,1,0]).to(torch.float32).repeat(len(APC_nodes), 1)
+    data["HC"].x = torch.tensor([0,0,0,0,0,0,0,0,0,1]).to(torch.float32).repeat(len(HC_nodes), 1)
+
+    data["MoA"].node_type = torch.ones(len(MoA_nodes), dtype=torch.long)
+    data["PE"].node_type = torch.ones(len(PE_nodes), dtype=torch.long)
+    data["TC"].node_type = torch.ones(len(TC_nodes), dtype=torch.long)
+    data["EPC"].node_type = torch.ones(len(EPC_nodes), dtype=torch.long)
+    data["EXT"].node_type = torch.ones(len(EXT_nodes), dtype=torch.long)
+    data["PK"].node_type = torch.ones(len(PK_nodes), dtype=torch.long)
+    data["APC"].node_type = torch.ones(len(APC_nodes), dtype=torch.long)
+    data["HC"].node_type = torch.ones(len(HC_nodes), dtype=torch.long)
+    
+
 
 
     # Add the edges
     for edge in nx_graph.edges:
+
+        from_node_list = []
+        to_node_list = []
+
+        from_node_type = nx_graph.nodes[edge[0]]["type"]
+        to_node_type = nx_graph.nodes[edge[1]]["type"]
+
+        if from_node_type == "drug":
+            from_node_list = drug_nodes
+        elif from_node_type == "disease":
+            from_node_list = disease_nodes
+        elif from_node_type == "MoA":
+            from_node_list = MoA_nodes
+        elif from_node_type == "PE":
+            from_node_list = PE_nodes
+        elif from_node_type == "TC":
+            from_node_list = TC_nodes
+        elif from_node_type == "EPC":
+            from_node_list = EPC_nodes
+        elif from_node_type == "EXT":
+            from_node_list = EXT_nodes
+        elif from_node_type == "PK":
+            from_node_list = PK_nodes
+        elif from_node_type == "APC":
+            from_node_list = APC_nodes
+        elif from_node_type == "HC":
+            from_node_list = HC_nodes
+
+        else:
+            raise ValueError("Node type not recognized")
+
+        if to_node_type == "drug":
+            to_node_list = drug_nodes
+        elif to_node_type == "disease":
+            to_node_list = disease_nodes
+        elif to_node_type == "MoA":
+            to_node_list = MoA_nodes
+        elif to_node_type == "PE":
+            to_node_list = PE_nodes
+        elif to_node_type == "TC":
+            to_node_list = TC_nodes
+        elif to_node_type == "EPC":
+            to_node_list = EPC_nodes
+        elif to_node_type == "EXT":
+            to_node_list = EXT_nodes
+        elif to_node_type == "PK":
+            to_node_list = PK_nodes
+        elif to_node_type == "APC":
+            to_node_list = APC_nodes
+        elif to_node_type == "HC":
+            to_node_list = HC_nodes
+        else:
+            raise ValueError("Node type not recognized")
+
         try:
-            data["drug", str(edge_attributes[edge]), "disease"].edge_index = torch.cat(
-                (data["drug", str(edge_attributes[edge]), "disease"].edge_index, torch.tensor([[drug_nodes.index(edge[0])], [disease_nodes.index(edge[1])]])), 
+            data[from_node_type, str(edge_attributes[edge]), to_node_type].edge_index = torch.cat(
+                (data[from_node_type, str(edge_attributes[edge]), to_node_type].edge_index, torch.tensor([[from_node_list.index(edge[0])], [to_node_list.index(edge[1])]])), 
                 dim=1)
+
         except:
-            data["drug", str(edge_attributes[edge]), "disease"].edge_index = (torch.tensor([[drug_nodes.index(edge[0])], [disease_nodes.index(edge[1])]]))
-    
+            data[from_node_type, str(edge_attributes[edge]), to_node_type].edge_index = (torch.tensor([[from_node_list.index(edge[0])], [to_node_list.index(edge[1])]]))
+
     return T.ToUndirected()(data)
 
 def is_bipartite(pyg):
@@ -88,10 +164,7 @@ def is_bipartite(pyg):
 
 if __name__ == "__main__":
     pyg = get_pyg()
-    
-    print(is_bipartite(pyg))
-
-    
+    print(pyg)    
         
     
 

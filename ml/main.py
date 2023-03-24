@@ -31,7 +31,7 @@ BATCH_SIZE = 128
 NUM_NEIGHBORS = [20, 10]
 SHUFFLE = False
 NUM_HEADS = None
-AGGR = 'max'
+AGGR = 'mean'
 DROPOUT = None
 EARLY_STOPPING_PATIENCE = 2
 
@@ -85,15 +85,15 @@ class GNN(torch.nn.Module):
         self.conv2 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
         self.conv3 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
         self.conv4 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
-        self.conv5 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
-        self.conv6 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
 
         self.act = F.leaky_relu
 
     def forward(self, x, edge_index):
         x = self.act(self.conv1(x, edge_index))
         x = self.act(self.conv2(x, edge_index))
-        x = self.conv6(x, edge_index)
+        x = self.act(self.conv3(x, edge_index))
+        x = self.act(self.conv4(x, edge_index))
+
         return x
 
 class Classifier(torch.nn.Module):
@@ -103,10 +103,10 @@ class Classifier(torch.nn.Module):
         # create neural network layers
 
         self.fc1 = torch.nn.Linear(200, 128)
-        self.fc2 = torch.nn.Linear(128, 64)
-        self.fc3 = torch.nn.Linear(64, 32)
-        self.fc4 = torch.nn.Linear(32, 8)
-        self.fc5 = torch.nn.Linear(8, 1)
+        self.fc2 = torch.nn.Linear(128, 32)
+        self.fc3 = torch.nn.Linear(32, 16)
+        self.fc4 = torch.nn.Linear(16, 1)
+
 
 
         self.act = F.leaky_relu
@@ -124,10 +124,8 @@ class Classifier(torch.nn.Module):
         edge_feat = self.act(self.fc1(edge_feat))
         edge_feat = self.act(self.fc2(edge_feat))
         edge_feat = self.act(self.fc3(edge_feat))
-        edge_feat = self.act(self.fc4(edge_feat))
-
-        edge_feat = self.fc5(edge_feat)
-
+        
+        edge_feat = self.fc4(edge_feat)
         
         # convert the tensor to a 1D array
 
@@ -143,6 +141,15 @@ class Model(torch.nn.Module):
         self.disease_lin = torch.nn.Linear(10, hidden_channels)
         self.drug_emb = torch.nn.Embedding(pyg["drug"].num_nodes, hidden_channels)
         self.disease_emb = torch.nn.Embedding(pyg["disease"].num_nodes, hidden_channels)
+        self.MoA_emb = torch.nn.Embedding(pyg["MoA"].num_nodes, hidden_channels)
+        self.EPC_emb = torch.nn.Embedding(pyg["EPC"].num_nodes, hidden_channels)
+        self.PE_emb = torch.nn.Embedding(pyg["PE"].num_nodes, hidden_channels)
+        self.TC_emb = torch.nn.Embedding(pyg["TC"].num_nodes, hidden_channels)
+        self.HC_emb = torch.nn.Embedding(pyg["HC"].num_nodes, hidden_channels)
+        self.APC_emb = torch.nn.Embedding(pyg["APC"].num_nodes, hidden_channels)
+        self.EXT_emb = torch.nn.Embedding(pyg["EXT"].num_nodes, hidden_channels)
+        self.PK_emb = torch.nn.Embedding(pyg["PK"].num_nodes, hidden_channels)
+
         # Instantiate homogeneous GNN:
         self.gnn = GNN(hidden_channels)
 
@@ -152,8 +159,16 @@ class Model(torch.nn.Module):
 
     def forward(self, data: HeteroData):
         x_dict = {
-          "drug": self.drug_emb(data["drug"].node_id),
-          "disease": self.disease_lin(data["disease"].x) + self.disease_emb(data["disease"].node_id),
+            "drug": self.drug_emb(data["drug"].node_id),
+            "disease": self.disease_lin(data["disease"].x) + self.disease_emb(data["disease"].node_id),
+            "MoA": self.MoA_emb(data["MoA"].node_id),
+            "EPC": self.EPC_emb(data["EPC"].node_id),
+            "PE": self.PE_emb(data["PE"].node_id),
+            "TC": self.TC_emb(data["TC"].node_id),
+            "HC": self.HC_emb(data["HC"].node_id),
+            "APC": self.APC_emb(data["APC"].node_id),
+            "EXT": self.EXT_emb(data["EXT"].node_id),
+            "PK": self.PK_emb(data["PK"].node_id),
         }
         # `x_dict` holds feature matrices of all node types
         # `edge_index_dict` holds all edge indices of all edge types
@@ -321,9 +336,8 @@ def export_model_configuration(ID):
         json.dump(model_config, f, indent=4)
 
 
-
 if __name__ == "__main__":
-    pyg = get_pyg()
+    pyg = get_pyg(True)
 
     train_data, val_data, test_data = transform(pyg)
 
