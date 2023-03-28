@@ -17,95 +17,93 @@ import csv
 import json
 from datetime import datetime
 import networkx as nx
+import optuna
 
 
-HIDDEN_CHANNELS = 100
+#HIDDEN_CHANNELS = 100
 EPOCHS = 10
-LEARNING_RATE = 0.001
+#LEARNING_RATE = 0.001
 NUM_VAL = 0.1
 NUM_TEST = 0.2
-DISJOINT_TRAIN_RATIO = 0.3
-NEG_SAMPLING_RATIO = 1.0
+#DISJOINT_TRAIN_RATIO = 0.3
+#NEG_SAMPLING_RATIO = 1.0
 ADD_NEGATIVE_TRAIN_SAMPLES = False
-BATCH_SIZE = 128
+#BATCH_SIZE = 128
 NUM_NEIGHBORS = [20, 10]
 SHUFFLE = False
-NUM_HEADS = None
-AGGR = 'mean'
-DROPOUT = None
-EARLY_STOPPING_PATIENCE = 2
+AGGR = 'max'
+EARLY_STOPPING_PATIENCE = 1
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-transform = T.RandomLinkSplit(
-    num_val=NUM_VAL,
-    num_test=NUM_TEST,
-    disjoint_train_ratio=DISJOINT_TRAIN_RATIO,
-    neg_sampling_ratio=NEG_SAMPLING_RATIO,
-    add_negative_train_samples=ADD_NEGATIVE_TRAIN_SAMPLES,
-    edge_types=("drug", "may_treat", "disease"),
-    rev_edge_types=("disease", "rev_may_treat", "drug"), 
-)
 
-def get_train_loader(train_data):
+def get_train_loader(train_data, negative_sample_ratio, batch_size ):
     edge_label_index = train_data["drug", "may_treat", "disease"].edge_label_index
     edge_label = train_data["drug", "may_treat", "disease"].edge_label
 
     train_loader = LinkNeighborLoader(
         data=train_data,
         num_neighbors=NUM_NEIGHBORS,
-        neg_sampling_ratio=NEG_SAMPLING_RATIO,
+        neg_sampling_ratio=negative_sample_ratio,
         edge_label_index=(("drug", "may_treat", "disease"), edge_label_index),
         edge_label=edge_label,
-        batch_size=BATCH_SIZE,
+        batch_size=batch_size,
         shuffle=SHUFFLE,
     )
     return train_loader
 
-def get_val_loader(val_data):
+def get_val_loader(val_data, batch_size, negative_sample_ratio):
     edge_label_index = val_data["drug", "may_treat", "disease"].edge_label_index
     edge_label = val_data["drug", "may_treat", "disease"].edge_label
 
     val_loader = LinkNeighborLoader(
         data=val_data,
         num_neighbors=NUM_NEIGHBORS,
-        neg_sampling_ratio=NEG_SAMPLING_RATIO,
+        neg_sampling_ratio=negative_sample_ratio,
         edge_label_index=(("drug", "may_treat", "disease"), edge_label_index),
         edge_label=edge_label,
-        batch_size=3 * BATCH_SIZE,
+        batch_size=3 * batch_size,
         shuffle=SHUFFLE,
         neighbor_sampler=None,
     )
     return val_loader
 
 class GNN(torch.nn.Module):
-    def __init__(self, hidden_channels):
+    def __init__(self, hidden_channels, size_gnn):
         super().__init__()
-        self.conv1 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
-        self.conv2 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
-        self.conv3 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
-        self.conv4 = SAGEConv(hidden_channels, hidden_channels, aggr=AGGR)
+        self.convs = torch.nn.ModuleList()
+
+        for i in range(size_gnn):
+            self.convs.append(SAGEConv(hidden_channels, hidden_channels))
 
         self.act = F.leaky_relu
 
     def forward(self, x, edge_index):
-        x = self.act(self.conv1(x, edge_index))
-        x = self.act(self.conv2(x, edge_index))
-        x = self.act(self.conv3(x, edge_index))
-        x = self.act(self.conv4(x, edge_index))
+        for conv in self.convs:
+            x = conv(x, edge_index)
+            x = self.act(x)
 
         return x
 
 class Classifier(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, size_nn, hidden_channels):
         super().__init__()
 
-        # create neural network layers
+        sizes = []
+        sizes.append(2*hidden_channels)
+        for i in range(size_nn):
+            size = 2**(size_nn-i+2)
 
-        self.fc1 = torch.nn.Linear(200, 128)
-        self.fc2 = torch.nn.Linear(128, 32)
-        self.fc3 = torch.nn.Linear(32, 16)
-        self.fc4 = torch.nn.Linear(16, 1)
+            if size > 2*hidden_channels:
+                size = 2*hidden_channels
+
+
+            sizes.append(size)
+
+        sizes.append(1)
+
+        self.fcs = torch.nn.ModuleList([torch.nn.Linear(sizes[i], sizes[i+1]) for i in range(len(sizes)-1)])
+        self.act = F.leaky_relu
 
 
 
@@ -121,11 +119,11 @@ class Classifier(torch.nn.Module):
 
         # Apply MLP to get a prediction per supervision edge:
         edge_feat = torch.cat([edge_feat_drug, edge_feat_disease], dim=-1)
-        edge_feat = self.act(self.fc1(edge_feat))
-        edge_feat = self.act(self.fc2(edge_feat))
-        edge_feat = self.act(self.fc3(edge_feat))
+
+        for fc in self.fcs[:-1]:
+            edge_feat = self.act(fc(edge_feat))
         
-        edge_feat = self.fc4(edge_feat)
+        edge_feat = self.fcs[-1](edge_feat)
         
         # convert the tensor to a 1D array
 
@@ -134,7 +132,7 @@ class Classifier(torch.nn.Module):
         return edge_feat
 
 class Model(torch.nn.Module):
-    def __init__(self, hidden_channels):
+    def __init__(self, hidden_channels, pyg, size_nn, size_gnn):
         super().__init__()
 
         # the first parameter is length of each input vector
@@ -151,11 +149,11 @@ class Model(torch.nn.Module):
         self.PK_emb = torch.nn.Embedding(pyg["PK"].num_nodes, hidden_channels)
 
         # Instantiate homogeneous GNN:
-        self.gnn = GNN(hidden_channels)
+        self.gnn = GNN(hidden_channels, size_gnn)
 
         # Convert GNN model into a heterogeneous variant:
         self.gnn = to_hetero(self.gnn, metadata=pyg.metadata())
-        self.classifier = Classifier()
+        self.classifier = Classifier(size_nn, hidden_channels)
 
     def forward(self, data: HeteroData):
         x_dict = {
@@ -182,9 +180,9 @@ class Model(torch.nn.Module):
         
         return pred
 
-def train_model(model, train_loader):
+def train_model(model, train_loader, lr):
     model = model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     for epoch in range(1, EPOCHS):
         total_loss = total_examples = 0
         for sampled_data in tqdm.tqdm(train_loader):
@@ -200,9 +198,9 @@ def train_model(model, train_loader):
             total_examples += pred.numel()
         print(f"Epoch: {epoch:03d}, Loss: {total_loss / total_examples:.4f}")
 
-def early_stopping_train_model(model, train_loader, val_loader):
+def early_stopping_train_model(model, train_loader, val_loader, lr):
     model = model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     best_val_loss = float('inf')
     epochs_since_improvement = 0
     for epoch in range(1, EPOCHS):
@@ -336,23 +334,124 @@ def export_model_configuration(ID):
         json.dump(model_config, f, indent=4)
 
 
-if __name__ == "__main__":
+def compute_validation_loss(model, val_loader):
+        # Compute validation loss
+        val_loss = 0
+        with torch.no_grad():
+            for sampled_data in val_loader:
+                sampled_data.to(device)
+                pred = model(sampled_data)
+                ground_truth = sampled_data["drug", "may_treat", "disease"].edge_label
+                loss = F.binary_cross_entropy_with_logits(pred, ground_truth)
+                val_loss += loss.item() * pred.numel()
+        val_loss /= len(val_loader.dataset)
+        return val_loss
+
+def train_and_eval_model(lr, hidden_channels, disjoint_train_ratio, neg_sampling_ratio, batch_size, size_gnn, size_nn):
     pyg = get_pyg(True)
+
+    transform = T.RandomLinkSplit(
+        num_val=NUM_VAL,
+        num_test=NUM_TEST,
+        disjoint_train_ratio=disjoint_train_ratio,
+        neg_sampling_ratio=neg_sampling_ratio,
+        add_negative_train_samples=ADD_NEGATIVE_TRAIN_SAMPLES,
+        edge_types=("drug", "may_treat", "disease"),
+        rev_edge_types=("disease", "rev_may_treat", "drug"), 
+    )
 
     train_data, val_data, test_data = transform(pyg)
 
-    train_loader = get_train_loader(train_data)
+    train_loader = get_train_loader(train_data, batch_size=batch_size, negative_sample_ratio=neg_sampling_ratio)
 
-    val_loader = get_val_loader(val_data)
+    val_loader = get_val_loader(val_data, batch_size=batch_size, negative_sample_ratio=neg_sampling_ratio)
 
-    model = Model(hidden_channels=HIDDEN_CHANNELS)
-    early_stopping_train_model(model, train_loader, val_loader)
+    model = Model(hidden_channels=hidden_channels, pyg=pyg, size_gnn=size_gnn, size_nn=size_nn)
+    early_stopping_train_model(model, train_loader, val_loader, lr)
+
+    val_loss = compute_validation_loss(model, val_loader)
+
+    return val_loss
+
+def objective(trail):
+
+    lr = trail.suggest_float("lr", 1e-5, 1e-1)
+    hidden_channels = trail.suggest_int("hidden_channels", 16, 128)
+    disjoint_train_ratio = trail.suggest_float("disjoint_train_ratio", 0.1, 0.5)
+    neg_sampling_ratio = trail.suggest_float("neg_sampling_ratio", 1, 3)
+    batch_size = trail.suggest_int("batch_size", 64, 265)
+    size_gnn = trail.suggest_int("size_gnn", 5, 15)
+    size_nn = trail.suggest_int("size_nn", 5, 15)
+
+    val_loss = train_and_eval_model(lr, hidden_channels, disjoint_train_ratio, neg_sampling_ratio, batch_size, size_gnn, size_nn)
+
+    return val_loss
+
+
+
+
+
+
+
+
+if __name__ == "__main__":
+    study = optuna.create_study(direction="minimize")
+    study.optimize(objective, n_trials=10, timeout=600)
+
+    print("Number of finished trials: {}".format(len(study.trials)))
+
+    print("Best trial:")
+    trial = study.best_trial
+
+    print("  Value: {}".format(trial.value))
+
+
+    print("  Params: ")
+    for key, value in trial.params.items():
+        print("    {}: {}".format(key, value))
+
+    lr = trial.params["lr"]
+    hidden_channels = trial.params["hidden_channels"]
+    disjoint_train_ratio = trial.params["disjoint_train_ratio"]
+    neg_sampling_ratio = trial.params["neg_sampling_ratio"]
+    batch_size = trial.params["batch_size"]
+    size_gnn = trial.params["size_gnn"]
+    size_nn = trial.params["size_nn"]
+
+
+    pyg = get_pyg(True)
+
+    transform = T.RandomLinkSplit(
+        num_val=NUM_VAL,
+        num_test=NUM_TEST,
+        disjoint_train_ratio=disjoint_train_ratio,
+        neg_sampling_ratio=neg_sampling_ratio,
+        add_negative_train_samples=ADD_NEGATIVE_TRAIN_SAMPLES,
+        edge_types=("drug", "may_treat", "disease"),
+        rev_edge_types=("disease", "rev_may_treat", "drug"), 
+    )
+
+    train_data, val_data, test_data = transform(pyg)
+
+    train_loader = get_train_loader(train_data, batch_size=batch_size, negative_sample_ratio=neg_sampling_ratio)
+
+    val_loader = get_val_loader(val_data, batch_size=batch_size, negative_sample_ratio=neg_sampling_ratio)
+
+    model = Model(hidden_channels=hidden_channels, pyg=pyg, size_gnn=size_gnn, size_nn=size_nn)
+    early_stopping_train_model(model, train_loader, val_loader, lr)
 
     auc, recall, accuracy, f1, precision = evaluate_model(model, test_data)
 
-    ID = get_id()
+    """ ID = get_id()
     append_model_results_to_csv(ID, auc, recall, accuracy, f1, precision)
     export_model_configuration(ID)
+    """
+
+
+
+
+
+
 
 
 
