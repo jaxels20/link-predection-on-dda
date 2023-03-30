@@ -98,7 +98,7 @@ def add_drugs_and_disease(G, root):
 def add_concepts(G, root):
     # add concepts as nodes to the graph from the xml file
         for element in root.findall('concept'):
-            attributes = {}
+            attributes = {'name': element.find("name").text}
             node_name = element.find("name").text + "_" + element.find("code").text
             
             for prop in element.findall('property'):
