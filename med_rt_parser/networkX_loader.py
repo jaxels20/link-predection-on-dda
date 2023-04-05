@@ -71,8 +71,8 @@ def get_networkx_graph(remove_self_loops=False, remove_isolated_nodes=False, bip
 def add_drugs_and_disease(G, root):
     for edge in root.findall('association'):
         try:
-            from_node_attributes = {}
-            to_node_attributes = {}
+            from_node_attributes = {'name': edge.find("from_name").text}
+            to_node_attributes = {'name': edge.find("to_name").text}
 
             from_node = edge.find("from_name").text + "_" + edge.find("from_code").text
             to_node = edge.find("to_name").text + "_" + edge.find("to_code").text
@@ -98,7 +98,7 @@ def add_drugs_and_disease(G, root):
 def add_concepts(G, root):
     # add concepts as nodes to the graph from the xml file
         for element in root.findall('concept'):
-            attributes = {}
+            attributes = {'name': element.find("name").text}
             node_name = element.find("name").text + "_" + element.find("code").text
             
             for prop in element.findall('property'):

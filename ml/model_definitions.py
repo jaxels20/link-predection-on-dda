@@ -140,6 +140,11 @@ class Generator(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(256, 256),
             nn.LeakyReLU(),
+            nn.Linear(256, 256),
+            nn.LeakyReLU(),
+            nn.Linear(256, 256),
+            nn.LeakyReLU(),
+            nn.LeakyReLU(),
             nn.Linear(256, num_drugs + num_diseases),
             nn.Softmax(dim=-1)
         )
@@ -185,17 +190,7 @@ class Discriminator(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(2*input_size, 256),
             nn.LeakyReLU(),
-            nn.Linear(256, 256),
-            nn.LeakyReLU(),
-            nn.Linear(256, 128),
-            nn.LeakyReLU(),
-            nn.Linear(128, 64),
-            nn.LeakyReLU(),
-            nn.Linear(64, 32),
-            nn.LeakyReLU(),
-            nn.Linear(32, 16),
-            nn.LeakyReLU(),
-            nn.Linear(16, 1),
+            nn.Linear(256, 1),
             nn.Sigmoid()
         )
         self.input_size = input_size
@@ -203,9 +198,6 @@ class Discriminator(nn.Module):
         self.disease_emb = torch.nn.Embedding(num_diseases, input_size)
         
     def forward(self, edge_index):
-        # encode the edge_index with a one-hot encoding
-        # x = torch.zeros(self.input_size, self.input_size)
-        # x[edge_index[0], edge_index[1]] = 1
         edge_index = edge_index.type(torch.LongTensor)
 
         drug_emb = self.drug_emb(edge_index[0])

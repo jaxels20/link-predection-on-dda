@@ -249,10 +249,10 @@ def train_and_eval_model_for_metrics_gan(lr, hidden_channels, disjoint_train_rat
 def train_gan():
     json_array = []
     print("train gan")
-    num_epochs = 100
-    batch_size = 256
-    d_epochs = 1
-    g_epochs = 2
+    num_epochs = 500
+    batch_size = 512
+    d_epochs = 100
+    g_epochs = 2000
 
     pyg = get_pyg(True)
 
@@ -271,11 +271,11 @@ def train_gan():
     
     # Define the loss function and optimizer for the discriminator
     d_criterion = nn.BCELoss()
-    d_optimizer = torch.optim.Adam(gan.discriminator.parameters(), lr=0.01)
+    d_optimizer = torch.optim.Adam(gan.discriminator.parameters(), lr=0.001)
 
     # Define the optimizer for the generator
     g_criterion = nn.BCEWithLogitsLoss()
-    g_optimizer = torch.optim.Adam(gan.generator.parameters(), lr=0.001)
+    g_optimizer = torch.optim.Adam(gan.generator.parameters(), lr=0.01)
 
     # Train the discriminator and generator in alternating steps
     for epoch in range(num_epochs):
@@ -291,7 +291,7 @@ def train_gan():
 
             # Compute the discriminator's predictions on the fake and real samples
             d_fake = gan.discriminator(fake_edge_index.detach())
-            d_real = gan.discriminator(real_edge_index)
+            d_real = gan.discriminator(real_edge_index.detach())
 
             # Compute the discriminator's loss
             d_fake_loss = d_criterion(d_fake, torch.zeros_like(d_fake))
@@ -307,7 +307,7 @@ def train_gan():
             # Train the generator
             gan.discriminator.eval()
             gan.generator.train()
-            
+                    
         for i in range(g_epochs):
             # Generate a batch of fake samples
             fake_edge_index = gan.generator.generate_edges(batch_size)
@@ -319,11 +319,12 @@ def train_gan():
             g_loss = g_criterion(d_fake, torch.ones_like(d_fake))
             
             # Backpropagate and update the generator's parameters
-            g_optimizer.zero_grad()
+            d_optimizer.zero_grad()
             g_loss.backward()
             g_optimizer.step()
+            if i % 100 == 0:
+                print(f"Epoch:{epoch}, i:{i}, d_fake_loss:{d_fake_loss}, d_real_loss{d_real_loss}, g_loss:{g_loss}")
 
-        print(f"Epoch:{epoch}, d_fake_loss:{d_fake_loss}, d_real_loss{d_real_loss}, g_loss:{g_loss}")
         json_array.append({"epoch": epoch, "d_fake_loss": d_fake_loss.item(), "d_real_loss": d_real_loss.item(), "g_loss": g_loss.item(), "d_loss": d_loss.item()})
     
     # convert the json array to csv and output it
