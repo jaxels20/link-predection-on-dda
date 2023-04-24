@@ -3,6 +3,7 @@ from pathlib import Path
 import networkx as nx
 import matplotlib.pyplot as plt
 
+
 # bfs traversal for drawing subgraph with a certain depth
 
 def bfs(graph, start, depth=1):
@@ -134,6 +135,7 @@ def add_all_edge(G, root):
 
 if __name__ == "__main__":
     G = get_networkx_graph(remove_self_loops=True, remove_isolated_nodes=True, bipartite=True)
+
 
 
 

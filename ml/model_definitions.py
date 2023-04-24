@@ -4,7 +4,11 @@ from torch_geometric.nn import SAGEConv
 from torch_geometric.nn import to_hetero
 import torch.nn as nn
 from torch_geometric.utils import negative_sampling
-from torch_geometric.nn import GCNConv
+import networkx as nx
+import numpy as np
+from torch_geometric.utils.convert import to_networkx
+from torch_geometric.nn import MetaPath2Vec
+
 
 class GNN(torch.nn.Module):
     def __init__(self, hidden_channels, size_gnn):
@@ -129,79 +133,63 @@ class Model(torch.nn.Module):
         return pred
 
 class Generator(nn.Module):
-    def __init__(self, input_size, num_drugs, num_diseases):
+    def __init__(self, input_size, num_drugs, num_diseases, embedder):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(input_size, 128),
+            nn.Linear(input_size, 256),
             nn.LeakyReLU(),
-            nn.Linear(128, 256),
-            nn.LeakyReLU(),
-            nn.Linear(256, 256),
-            nn.LeakyReLU(),
-            nn.Linear(256, 256),
-            nn.LeakyReLU(),
-            nn.Linear(256, 256),
-            nn.LeakyReLU(),
-            nn.Linear(256, 256),
-            nn.LeakyReLU(),
-            nn.LeakyReLU(),
-            nn.Linear(256, num_drugs + num_diseases),
-            nn.Softmax(dim=-1)
+            nn.Linear(256, num_diseases),
+            nn.Softmax(dim=-1),
         )
         self.num_drugs = num_drugs
         self.num_diseases = num_diseases
         self.input_size = input_size
+        self.drug_emb = embedder("drug")
 
-    def forward(self, x):
-        scores = self.net(x)
-        drug_scores, disease_scores = scores[:, :self.num_drugs], scores[:, self.num_drugs:]
-        
-        # Create mask to exclude edges between nodes of the same type
-        mask = torch.ones(self.num_drugs, self.num_diseases)
-        drug_indices = torch.arange(self.num_drugs)
-        disease_indices = torch.arange(self.num_diseases)
-        mask[drug_indices[:, None], disease_indices[None, :]] = 0
-        
-        # Apply mask to scores
-        #scores = scores * mask.view(-1)
+
+    def forward(self, batch_size):
+
+        # Sample a random batch of drugs
+        drug_idx = torch.randint(high=self.num_drugs, size=(batch_size,))
+
+        drug_embeddings = self.drug_emb[drug_idx]
+
+        # generate the probability distribution for diseases
+        scores = self.net(drug_embeddings)
         
         # Sample indices for drugs and diseases separately
-        drug_idx = torch.multinomial(drug_scores, num_samples=1).squeeze()
-        disease_idx = torch.multinomial(disease_scores, num_samples=1).squeeze()
+        disease_idx = torch.multinomial(scores, num_samples=1).squeeze()
         
-        return drug_idx, disease_idx
-    
-    def generate_edges(self, num_edges):
-        noise = torch.randn(num_edges, self.input_size)
-
-        drug_idx, disease_idx = self(noise)
         fake_edge_index = torch.stack([drug_idx, disease_idx], dim=0)
 
         # convert the edge_index to a float tensor
         fake_edge_index = fake_edge_index.type(torch.FloatTensor)
 
-        return fake_edge_index
+        return fake_edge_index, scores, disease_idx
+    
+        
 
     
 # Define the discriminator network
 class Discriminator(nn.Module):
-    def __init__(self, input_size, num_drugs, num_diseases):
+    def __init__(self, input_size, embedder):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(2*input_size, 256),
-            nn.LeakyReLU(),
-            nn.Linear(256, 1),
+            nn.Linear(input_size, 64),
+            nn.Sigmoid(),
+            nn.Linear(64, 1),
             nn.Sigmoid()
         )
         self.input_size = input_size
-        self.drug_emb = torch.nn.Embedding(num_drugs, input_size)
-        self.disease_emb = torch.nn.Embedding(num_diseases, input_size)
+        self.drug_emb = embedder("drug")
+        self.disease_emb = embedder("disease")
+
         
     def forward(self, edge_index):
         edge_index = edge_index.type(torch.LongTensor)
 
-        drug_emb = self.drug_emb(edge_index[0])
-        disease_emb = self.disease_emb(edge_index[1])
+        drug_emb = self.drug_emb[edge_index[0]]
+        disease_emb = self.disease_emb[edge_index[1]]
 
         x = torch.cat([drug_emb, disease_emb], dim=1)
 
@@ -210,13 +198,15 @@ class Discriminator(nn.Module):
 
 # Define the GAN
 class GAN(nn.Module):
-    def __init__(self, input_size, num_drugs, num_diseases):
+    def __init__(self, emb_dim, num_drugs, num_diseases, pyg):
         super(GAN, self).__init__()
-        self.discriminator = Discriminator(input_size=input_size, num_drugs=num_drugs, num_diseases=num_diseases)
-        self.generator = Generator(input_size, num_drugs, num_diseases)
+        self.embedder = self.get_emb(pyg, emb_dim)
+
+        self.discriminator = Discriminator(input_size=2 * emb_dim, embedder=self.embedder)
+        self.generator = Generator(emb_dim, num_drugs, num_diseases, embedder=self.embedder)
         self.num_drugs = num_drugs
         self.num_diseases = num_diseases
-        self.input_size = input_size
+        self.emb_dim = emb_dim
 
 
     def forward(self, pyg):
@@ -242,9 +232,38 @@ class GAN(nn.Module):
         real_scores = scores[:edge_index.size(1)]
         fake_scores = scores[edge_index.size(1):]
 
+    def get_emb(self, pyg, emb_dim):
+        # Define Node2Vec model
+        metapath = [
+        ('drug', 'may_treat', 'disease'),
+        ('disease', 'rev_may_treat', 'drug'),
+        ]
+
+        device = "cpu"
+
+        model = MetaPath2Vec(pyg.edge_index_dict, embedding_dim=emb_dim,
+                            metapath=metapath, walk_length=4, context_size=4,
+                            walks_per_node=5, num_negative_samples=5,
+                            sparse=True).to(device)
+
+        loader = model.loader(batch_size=128, shuffle=True, num_workers=6)
+        optimizer = torch.optim.SparseAdam(list(model.parameters()), lr=0.01)
         
+        for epoch in range(1, 20):
+            total_loss = 0
+            for i, (pos_rw, neg_rw) in enumerate(loader):
+                optimizer.zero_grad()
+                loss = model.loss(pos_rw.to(device), neg_rw.to(device))
+                loss.backward()
+                optimizer.step()
 
+                total_loss += loss.item()
+                """ if (i + 1) % 10 == 0:
+                    print((f'Epoch: {epoch}, Step: {i + 1:05d}/{len(loader)}, '
+                        f'Loss: {total_loss / 100:.4f}'))
+                    total_loss = 0 """
 
+        return model
         
 
 
