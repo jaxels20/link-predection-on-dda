@@ -1,0 +1,25 @@
+{
+    "ID": 121,
+    "TIMESTAMP": "2023-05-03 11:20:15.637950",
+    "EPOCHS": 2,
+    "LEARNING_RATE": 0.01,
+    "HIDDEN_CHANNELS": 100,
+    "NUM_VAL": 0.1,
+    "NUM_TEST": 0.2,
+    "DISJOINT_TRAIN_RATIO": 0.3,
+    "NEG_SAMPLING_RATIO": 1,
+    "ADD_NEGATIVE_TRAIN_SAMPLES": false,
+    "BATCH_SIZE": 64,
+    "NUM_NEIGHBORS": [
+        20,
+        10
+    ],
+    "SHUFFLE": true,
+    "AGGR": "max",
+    "gnn_config": {
+        "convs": "ModuleList(\n  (0-4): 5 x ModuleDict(\n    (drug__may_treat__disease): SAGEConv(100, 100, aggr=mean)\n    (disease__rev_may_treat__drug): SAGEConv(100, 100, aggr=mean)\n  )\n)"
+    },
+    "classifier_config": {
+        "fcs": "ModuleList(\n  (0): Linear(in_features=200, out_features=128, bias=True)\n  (1): Linear(in_features=128, out_features=64, bias=True)\n  (2): Linear(in_features=64, out_features=32, bias=True)\n  (3): Linear(in_features=32, out_features=16, bias=True)\n  (4): Linear(in_features=16, out_features=8, bias=True)\n  (5): Linear(in_features=8, out_features=1, bias=True)\n)"
+    }
+}

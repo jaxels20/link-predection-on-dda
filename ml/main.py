@@ -7,15 +7,25 @@ from torch_geometric.loader import LinkNeighborLoader
 import tqdm
 from sklearn.metrics import roc_auc_score, recall_score, accuracy_score, f1_score, precision_score
 import numpy as np
-from model_definitions import Model, GAN
+from model_definitions import Model, GAN, Generator
 import torch.nn.functional as F
 import export_model
 from torch import nn
 import pandas as pd
 from torch_geometric.utils import degree
 import draw_gan_performance as dgf
+import plotly.express as px
+import plotly.graph_objects as go
+import time
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+def load_gen():
+    path = "generator.pt"
+    model = torch.load(path)
+    model.eval()
+
+    return model
+
 
 def get_train_loader(train_data, negative_sample_ratio, batch_size, num_neighbors, shuffle=True):
     edge_label_index = train_data["drug", "may_treat", "disease"].edge_label_index
@@ -216,22 +226,48 @@ def train_and_eval_model_for_metrics(lr, hidden_channels, disjoint_train_ratio, 
 
     export_model.export_model_configuration(ID, model, num_epochs, lr, hidden_channels, num_val, num_test, disjoint_train_ratio, neg_sampling_ratio, add_negative_train_samples, batch_size, num_neighbors, shuffle, aggr)
 
+def apply_gan(gen, data, neg_sample_ratio):
+    num_neg_samples = int(data["drug", "may_treat", "disease"].edge_label.size(0) * neg_sample_ratio)
+    neg_samples, policies, disease_idx = gen(num_neg_samples)
+    print(policies)
+
+    neg_samples = neg_samples.to(torch.int64)
+
+    data["drug", "may_treat", "disease"].edge_label = torch.cat([data["drug", "may_treat", "disease"].edge_label, torch.zeros(num_neg_samples, dtype=torch.int64)])
+    
+    data["drug", "may_treat", "disease"].edge_index = torch.cat([data["drug", "may_treat", "disease"].edge_index, neg_samples], dim=1)
+
+    # edge label index 
+    data["drug", "may_treat", "disease"].edge_label_index = torch.cat([data["drug", "may_treat", "disease"].edge_label_index, neg_samples], dim=1)
+
+    return data
+
 def train_and_eval_model_for_metrics_gan(lr, hidden_channels, disjoint_train_ratio, batch_size, size_gnn, size_nn, early_stopping_patience, num_epochs, is_bipartite, num_val, num_test, add_negative_train_samples, num_neighbors, shuffle):
     
         pyg = get_pyg(is_bipartite)
 
-        neg_sampling_ratio = 0
+        neg_sampling_ratio = 1
     
-        train_data, val_data, test_data = get_train_val_test_data(pyg, num_val, num_test, disjoint_train_ratio, neg_sampling_ratio, add_negative_train_samples)
-    
-        train_loader = get_train_loader(train_data, batch_size=batch_size, negative_sample_ratio=neg_sampling_ratio, num_neighbors=num_neighbors, shuffle=shuffle )
-    
+        train_data, val_data, test_data = get_train_val_test_data(pyg, num_val, num_test, disjoint_train_ratio, neg_sampling_ratio, False)
+
+
+        # applying GAN to train data
+
+        gen = load_gen()
+        train_data = apply_gan(gen, train_data, 1)
+
+        train_loader = get_train_loader(train_data, batch_size=batch_size, negative_sample_ratio=0, num_neighbors=num_neighbors, shuffle=shuffle )
+        
+        for x in train_loader:
+            print(x)
+            
         val_loader = get_val_loader(val_data, batch_size=batch_size, negative_sample_ratio=neg_sampling_ratio, num_neighbors=num_neighbors, shuffle=shuffle)
-    
+
         model = Model(hidden_channels=hidden_channels, pyg=pyg, size_gnn=size_gnn, size_nn=size_nn, is_bipartite=is_bipartite)
+        
         early_stopping_train_model(model, train_loader, val_loader, lr, num_epochs, early_stopping_patience)
     
-        auc, recall, accuracy, f1, precision = evaluate_model(model, val_data)
+        auc, recall, accuracy, f1, precision = evaluate_model(model, test_data)
     
         # export the model 
     
@@ -242,13 +278,13 @@ def train_and_eval_model_for_metrics_gan(lr, hidden_channels, disjoint_train_rat
         export_model.export_model_configuration(ID, model, num_epochs, lr, hidden_channels, num_val, num_test, disjoint_train_ratio, neg_sampling_ratio, add_negative_train_samples, batch_size, num_neighbors, shuffle, aggr)
     
 def train_gan():
-    g_data = {"overall_epoch": [], "sub_epoch": [], "loss": [], "acc": []}
-    d_data = {"overall_epoch": [], "sub_epoch": [], "loss": [], "acc": []}
+    data = {"epoch": [], "d_loss": [], "d_acc": [], "g_loss": [], "g_acc": [], "var": [], "reward_prct": []}
     print("train gan")
-    num_epochs = 60
+    num_epochs = 1000
     batch_size = 2000
+    half_batch_size = int(batch_size / 2)
     d_epochs = 1
-    g_epochs = 1
+    g_epochs = 3
 
     pyg = get_pyg(True)
 
@@ -275,7 +311,7 @@ def train_gan():
     d_optimizer = torch.optim.Adam(gan.discriminator.parameters(), lr=0.001)
 
     # Define the optimizer for the generator
-    g_optimizer = torch.optim.Adam(gan.generator.parameters(), lr=0.001)
+    g_optimizer = torch.optim.Adam(gan.generator.parameters(), lr=0.00001)
 
     # Train the discriminator and generator in alternating steps
     for epoch in range(num_epochs):
@@ -284,10 +320,10 @@ def train_gan():
             gan.discriminator.train()
             gan.generator.eval()
             d_optimizer.zero_grad()
-            fake_edge_index, _, _  = gan.generator(batch_size=batch_size)
+            fake_edge_index, _, _  = gan.generator(batch_size=half_batch_size)
 
             # Generate a batch of real samples
-            real_edge_index_random_idx = torch.randint(low=0, high=real_edge_index.shape[1], size=(batch_size,))
+            real_edge_index_random_idx = torch.randint(low=0, high=real_edge_index.shape[1], size=(half_batch_size,))
 
             real_edge_index_batch = real_edge_index[:, real_edge_index_random_idx]
 
@@ -316,7 +352,6 @@ def train_gan():
             # Backpropagate and update the discriminator's parameters
             d_loss.backward()
             d_optimizer.step()
-            print(f"d_loss: {d_loss}, d_acc: {d_acc}")
                 
 
 
@@ -327,13 +362,17 @@ def train_gan():
             # Generate a batch of fake samples
             fake_edge_index, policies, disease_idx = gan.generator(batch_size=batch_size)
 
-            #log_policies = torch.log(policies)
+            log_policies = torch.log(policies)
             # Compute the discriminator's predictions on the fake samples
             d_out = gan.discriminator(fake_edge_index)
 
             # scale the reward so the reward has range -1 to 1
         
             scaled_d_out = d_out * 2 - 1
+
+            # number of positive scaled_d_out
+            num_pos = torch.sum(scaled_d_out > 0).item() / scaled_d_out.size(0)
+
             
             # There are a total of 1308 diseases, so we need to convert the disease_idx to a one-hot vector
             temp = torch.zeros((len(disease_idx), 1308))
@@ -345,79 +384,51 @@ def train_gan():
             temp = temp * scaled_d_out
 
             # find the dot product of the policies and the reward
-            reward = torch.sum(temp * -policies, dim=1)
+            reward = torch.sum(temp * log_policies, dim=1)
 
             rounded_d_fake = torch.round(d_out)
 
             # calculate the accuracy of the generatorF
             correct_fakes = int(torch.sum(rounded_d_fake).item())
             g_acc = correct_fakes / reward.size(0)
-            print(f"correct_fakes: {correct_fakes}, g_acc: {g_acc}")
-            from time import sleep
-            sleep(0.5)
-
             
             # Compute the generator's loss
-            g_loss = torch.mean(reward)
-            
-            
+            g_loss = - torch.mean(reward)
+
             # Backpropagate and update the generator's parameters
             g_optimizer.zero_grad()
             g_loss.backward()
-            # print the gradients of the generator
-            #print(gan.generator.net[0].weight.grad)
             g_optimizer.step()
-            if i % 50 == 0:
-                print(f"g_loss: {g_loss.item()} g_acc: {g_acc}")
-
-                
-        if epoch % 1 == 0:
-            g_data["overall_epoch"].append(epoch)
-            d_data["overall_epoch"].append(epoch)
-
-            g_data["sub_epoch"].append(i)
-            d_data["sub_epoch"].append(i)
-
-            g_data["loss"].append(g_loss.item())
-            d_data["loss"].append(d_loss.item())
-
-            g_data["acc"].append(g_acc)
-            d_data["acc"].append(d_acc)
-
-
         
+        print(f"epoch: {epoch}    d_loss: {d_loss}    d_acc: {d_acc}    g_loss:{g_loss}    g_acc: {g_acc}")
 
-        """ if epoch % 50 == 0:
+        data["d_loss"].append(d_loss.item())
+        data["d_acc"].append(d_acc)
+        data["g_loss"].append(g_loss.item())
+        data["g_acc"].append(g_acc)
+        data["var"].append(torch.var(disease_idx.float()).item())
+    
 
-            new_edge_index = gan.generator.generate_edges(edge_index, batch_size=len(edge_index[0]))
+    # plot the loss and accuracy
+    fig = go.Figure()
+    var_fig = go.Figure()
 
-            x = new_edge_index[0]
+    fig.add_trace(go.Scatter(x=list(range(num_epochs)), y=data["d_loss"], name="d_loss"))
+    fig.add_trace(go.Scatter(x=list(range(num_epochs)), y=data["g_loss"], name="g_loss"))
+    fig.add_trace(go.Scatter(x=list(range(num_epochs)), y=data["d_acc"], name="d_acc"))
+    fig.add_trace(go.Scatter(x=list(range(num_epochs)), y=data["g_acc"], name="g_acc"))
+    var_fig.add_trace(go.Scatter(x=list(range(num_epochs)), y=data["var"], name="var"))
 
-            x = x.tolist()
-            x = [int(i) for i in x]
-            x = torch.tensor(x)
+    var_fig.show()
+    fig.show()
 
-            y = new_edge_index[1]
-            y = y.tolist()
-            y = [int(i) for i in y]
-            y = torch.tensor(y)
+    # save the model
+    torch.save(gan.generator, "generator.pt")
 
 
-            drug_degree = degree(x, len(pyg["drug"]["node_id"]))
-            disease_degree = degree(y, len(pyg["disease"]["node_id"]))
-
-            dgf.draw_degree_dist([drug_degree.tolist(), disease_degree.tolist()], epoch=epoch, names=["drug", "disease"])
- """
-
-    # convert the json array to csv and output it
-
-    d_df = pd.DataFrame(d_data)
-    g_df = pd.DataFrame(g_data)
-    d_df.to_csv("d.csv")
-    g_df.to_csv("g.csv")
 
 if __name__ == "__main__":
-
+    torch.set_printoptions(precision=8)
     lr  = 0.01
     hidden_channels = 100
     disjoint_train_ratio = 0.3
@@ -425,27 +436,22 @@ if __name__ == "__main__":
     batch_size = 64
     size_gnn = 5
     size_nn = 5
-    num_epochs = 2
+    num_epochs = 50
     num_val = 0.1
     num_test = 0.2
     add_negative_train_samples = False
     num_neighbors = [20, 10]
-    shuffle = False
+    shuffle = True
     aggr = 'max'
-    early_stopping_patience = 2
+    early_stopping_patience = 8
     is_bipartite = True
+    
+    train_and_eval_model_for_metrics_gan(
+        lr, hidden_channels, disjoint_train_ratio, batch_size, size_gnn, size_nn, early_stopping_patience, num_epochs, is_bipartite, num_val, num_test, add_negative_train_samples, num_neighbors, shuffle
+    )
+    #train_gan()
 
-    train_gan()
-
-    """     pyg = get_pyg(True)
-
-
-    drug_degree = degree(pyg["drug", "may_treat", "disease"].edge_index[0], len(pyg["drug"]["node_id"]))
-    disease_degree = degree(pyg["drug", "may_treat", "disease"].edge_index[1], len(pyg["disease"]["node_id"]))
-
-
-
-    dgf.draw_degree_dist([drug_degree.tolist(), disease_degree.tolist()]) """
+    
 
 
     

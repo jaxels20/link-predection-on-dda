@@ -8,7 +8,14 @@ import networkx as nx
 import numpy as np
 from torch_geometric.utils.convert import to_networkx
 from torch_geometric.nn import MetaPath2Vec
-
+class PrintLayer(nn.Module):
+    def __init__(self):
+        super().__init__()
+        
+    def forward(self, x):
+        print("torch.isfinite(x).all(): {}, min. {:.5f}, max. {:.5f}".format(
+            torch.isfinite(x).all(), x.min(), x.max()))
+        return x
 
 class GNN(torch.nn.Module):
     def __init__(self, hidden_channels, size_gnn):
@@ -138,6 +145,8 @@ class Generator(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(input_size, 256),
             nn.LeakyReLU(),
+            nn.Linear(256, 256),
+            nn.LeakyReLU(),
             nn.Linear(256, num_diseases),
             nn.Softmax(dim=-1),
         )
@@ -151,8 +160,11 @@ class Generator(nn.Module):
 
         # Sample a random batch of drugs
         drug_idx = torch.randint(high=self.num_drugs, size=(batch_size,))
-
         drug_embeddings = self.drug_emb[drug_idx]
+
+        """ # do batch normalization
+        bn = nn.BatchNorm1d(self.input_size)
+        drug_embeddings = bn(drug_embeddings) """
 
         # generate the probability distribution for diseases
         scores = self.net(drug_embeddings)
@@ -166,9 +178,6 @@ class Generator(nn.Module):
         fake_edge_index = fake_edge_index.type(torch.FloatTensor)
 
         return fake_edge_index, scores, disease_idx
-    
-        
-
     
 # Define the discriminator network
 class Discriminator(nn.Module):
