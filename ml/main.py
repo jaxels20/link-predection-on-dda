@@ -63,7 +63,7 @@ def get_train_val_test_data(pyg, num_val, num_test, disjoint_train_ratio, neg_sa
         num_val=num_val,
         num_test=num_test,
         disjoint_train_ratio=disjoint_train_ratio,
-        neg_sampling_ratio=neg_sampling_ratio,
+        neg_sampling_ratio=0.0,
         add_negative_train_samples=add_negative_train_samples,
         edge_types=("drug", "may_treat", "disease"),
         rev_edge_types=("disease", "rev_may_treat", "drug")
@@ -84,6 +84,8 @@ def early_stopping_train_model(model, train_loader, val_loader, lr, epochs, earl
             """ Calls the forward function of the model """
             pred = model(sampled_data)
             ground_truth = sampled_data["drug", "may_treat", "disease"].edge_label
+            #print('pred: ', pred)
+            #print('ground_truth: ', ground_truth)
             loss = F.binary_cross_entropy_with_logits(pred, ground_truth)
             loss.backward()
             optimizer.step()
@@ -115,7 +117,7 @@ def early_stopping_train_model(model, train_loader, val_loader, lr, epochs, earl
         
         print(f"Epoch: {epoch:03d}, Train Loss: {total_loss / total_examples:.4f}, Val Loss: {val_loss:.4f}")
 
-def evaluate_model(model, data):
+def evaluate_model(model, data, batch_size, negative_sample_ratio):
     # Define the validation seed edges:
     edge_label_index = data["drug", "may_treat", "disease"].edge_label_index
     edge_label = data["drug", "may_treat", "disease"].edge_label
@@ -124,8 +126,9 @@ def evaluate_model(model, data):
         num_neighbors=[20, 10],
         edge_label_index=(("drug", "may_treat", "disease"), edge_label_index),
         edge_label=edge_label,
-        batch_size=128,
-        shuffle=False,
+        batch_size=batch_size,
+        shuffle=True,
+        neg_sampling_ratio=1.0
     )
     sampled_data = next(iter(val_loader))
 
@@ -181,11 +184,11 @@ def train_and_eval_model_for_HPT(lr, hidden_channels, disjoint_train_ratio, neg_
 
     num_val = 0.1
     num_test = 0.2
-    add_negative_train_samples = True
+    add_negative_train_samples = False
     num_neighbors = [20, 10]
     shuffle = True
-    num_epochs = 4
-    early_stopping_patience = 1
+    num_epochs = 500
+    early_stopping_patience = 5
     is_bipartite = True
 
     pyg = get_pyg(is_bipartite)
@@ -216,7 +219,7 @@ def train_and_eval_model_for_metrics(lr, hidden_channels, disjoint_train_ratio, 
     model = Model(hidden_channels=hidden_channels, pyg=pyg, size_gnn=size_gnn, size_nn=size_nn, is_bipartite=is_bipartite)
     early_stopping_train_model(model, train_loader, val_loader, lr, num_epochs, early_stopping_patience)
 
-    auc, recall, accuracy, f1, precision = evaluate_model(model, val_data)
+    auc, recall, accuracy, f1, precision = evaluate_model(model, test_data, batch_size, neg_sampling_ratio)
 
     # export the model 
 
@@ -224,7 +227,7 @@ def train_and_eval_model_for_metrics(lr, hidden_channels, disjoint_train_ratio, 
 
     export_model.append_performance_metrics_to_csv(ID, auc, recall, accuracy, f1, precision)
 
-    export_model.export_model_configuration(ID, model, num_epochs, lr, hidden_channels, num_val, num_test, disjoint_train_ratio, neg_sampling_ratio, add_negative_train_samples, batch_size, num_neighbors, shuffle, aggr)
+    #export_model.export_model_configuration(ID, model, num_epochs, lr, hidden_channels, num_val, num_test, disjoint_train_ratio, neg_sampling_ratio, add_negative_train_samples, batch_size, num_neighbors, shuffle, aggr="max")
 
 def apply_gan(gen, data, neg_sample_ratio):
     num_neg_samples = int(data["drug", "may_treat", "disease"].edge_label.size(0) * neg_sample_ratio)
