@@ -34,7 +34,7 @@ def get_train_loader(train_data, negative_sample_ratio, batch_size, num_neighbor
     train_loader = LinkNeighborLoader(
         data=train_data,
         num_neighbors=num_neighbors,
-        neg_sampling_ratio=negative_sample_ratio,
+        neg_sampling_ratio=0,
         edge_label_index=(("drug", "may_treat", "disease"), edge_label_index),
         edge_label=edge_label,
         batch_size=batch_size,
@@ -49,7 +49,7 @@ def get_val_loader(val_data, batch_size, negative_sample_ratio, num_neighbors, s
     val_loader = LinkNeighborLoader(
         data=val_data,
         num_neighbors=num_neighbors,
-        neg_sampling_ratio=negative_sample_ratio,
+        neg_sampling_ratio=0,
         edge_label_index=(("drug", "may_treat", "disease"), edge_label_index),
         edge_label=edge_label,
         batch_size=3 * batch_size,
@@ -63,7 +63,7 @@ def get_train_val_test_data(pyg, num_val, num_test, disjoint_train_ratio, neg_sa
         num_val=num_val,
         num_test=num_test,
         disjoint_train_ratio=disjoint_train_ratio,
-        neg_sampling_ratio=0.0,
+        neg_sampling_ratio=neg_sampling_ratio,
         add_negative_train_samples=add_negative_train_samples,
         edge_types=("drug", "may_treat", "disease"),
         rev_edge_types=("disease", "rev_may_treat", "drug")
@@ -117,7 +117,7 @@ def early_stopping_train_model(model, train_loader, val_loader, lr, epochs, earl
         
         print(f"Epoch: {epoch:03d}, Train Loss: {total_loss / total_examples:.4f}, Val Loss: {val_loss:.4f}")
 
-def evaluate_model(model, data, batch_size, negative_sample_ratio):
+def evaluate_model(model, data, batch_size, negative_sample_ratio, shuffle):
     # Define the validation seed edges:
     edge_label_index = data["drug", "may_treat", "disease"].edge_label_index
     edge_label = data["drug", "may_treat", "disease"].edge_label
@@ -127,8 +127,8 @@ def evaluate_model(model, data, batch_size, negative_sample_ratio):
         edge_label_index=(("drug", "may_treat", "disease"), edge_label_index),
         edge_label=edge_label,
         batch_size=batch_size,
-        shuffle=True,
-        neg_sampling_ratio=1.0
+        shuffle=shuffle,
+        neg_sampling_ratio=0
     )
     sampled_data = next(iter(val_loader))
 
@@ -180,13 +180,12 @@ def compute_validation_loss(model, val_loader):
         val_loss /= len(val_loader.dataset)
         return val_loss
 
-def train_and_eval_model_for_HPT(lr, hidden_channels, disjoint_train_ratio, neg_sampling_ratio, batch_size, size_gnn, size_nn):
+def train_and_eval_model_for_HPT(lr, hidden_channels, disjoint_train_ratio, neg_sampling_ratio, batch_size, size_gnn, size_nn, shuffle):
 
     num_val = 0.1
     num_test = 0.2
-    add_negative_train_samples = False
+    add_negative_train_samples = True
     num_neighbors = [20, 10]
-    shuffle = True
     num_epochs = 500
     early_stopping_patience = 5
     is_bipartite = True
@@ -195,9 +194,9 @@ def train_and_eval_model_for_HPT(lr, hidden_channels, disjoint_train_ratio, neg_
 
     train_data, val_data, test_data = get_train_val_test_data(pyg, num_val, num_test, disjoint_train_ratio, neg_sampling_ratio, add_negative_train_samples)
 
-    train_loader = get_train_loader(train_data, batch_size=batch_size, negative_sample_ratio=neg_sampling_ratio, num_neighbors=num_neighbors, shuffle=shuffle )
+    train_loader = get_train_loader(train_data, batch_size=batch_size, negative_sample_ratio=0, num_neighbors=num_neighbors, shuffle=shuffle )
 
-    val_loader = get_val_loader(val_data, batch_size=batch_size, negative_sample_ratio=neg_sampling_ratio, num_neighbors=num_neighbors, shuffle=shuffle)
+    val_loader = get_val_loader(val_data, batch_size=batch_size, negative_sample_ratio=0, num_neighbors=num_neighbors, shuffle=shuffle)
 
     model = Model(hidden_channels=hidden_channels, pyg=pyg, size_gnn=size_gnn, size_nn=size_nn, is_bipartite=is_bipartite)
     early_stopping_train_model(model, train_loader, val_loader, lr, num_epochs, early_stopping_patience)
@@ -219,7 +218,7 @@ def train_and_eval_model_for_metrics(lr, hidden_channels, disjoint_train_ratio, 
     model = Model(hidden_channels=hidden_channels, pyg=pyg, size_gnn=size_gnn, size_nn=size_nn, is_bipartite=is_bipartite)
     early_stopping_train_model(model, train_loader, val_loader, lr, num_epochs, early_stopping_patience)
 
-    auc, recall, accuracy, f1, precision = evaluate_model(model, test_data, batch_size, neg_sampling_ratio)
+    auc, recall, accuracy, f1, precision = evaluate_model(model, test_data, batch_size, negative_sample_ratio=0, shuffle=shuffle)
 
     # export the model 
 

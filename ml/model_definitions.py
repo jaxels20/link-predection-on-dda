@@ -23,7 +23,7 @@ class GNN(torch.nn.Module):
         self.convs = torch.nn.ModuleList()
 
         for i in range(size_gnn):
-            self.convs.append(SAGEConv(hidden_channels, hidden_channels))
+            self.convs.append(SAGEConv(hidden_channels, hidden_channels, aggr='mean'))
 
         self.act = F.leaky_relu
 
@@ -52,10 +52,7 @@ class Classifier(torch.nn.Module):
         sizes.append(1)
 
         self.fcs = torch.nn.ModuleList([torch.nn.Linear(sizes[i], sizes[i+1]) for i in range(len(sizes)-1)])
-        self.act = F.leaky_relu
-
-
-
+        #self.fcs = torch.nn.ModuleList([torch.nn.Linear(200, 128), torch.nn.Linear(128, 64), torch.nn.Linear(64, 32), torch.nn.Linear(32, 8), torch.nn.Linear(8, 1)])
         self.act = F.leaky_relu
 
     def forward(self, x_drug, x_disease, edge_label_index):

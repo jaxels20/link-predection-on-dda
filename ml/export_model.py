@@ -5,7 +5,7 @@ import csv
 
 def get_next_id():
     try:
-        with open('model_results.csv', 'r') as f:
+        with open('optim_metric_variance_prebatch_meanaggr.csv', 'r') as f:
             reader = csv.reader(f)
             last_id = list(reader)[-1][0]
         return int(last_id) + 1
@@ -13,7 +13,7 @@ def get_next_id():
         return 1
 
 def append_performance_metrics_to_csv(ID, auc, recall, accuracy, f1, precision):
-    with open('model_results.csv', 'a') as f:
+    with open('optim_metric_variance_prebatch_meanaggr.csv', 'a') as f:
         writer = csv.writer(f)
         writer.writerow([ID, auc, recall, accuracy, f1, precision])
     
