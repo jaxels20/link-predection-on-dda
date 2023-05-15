@@ -23,7 +23,7 @@ class GNN(torch.nn.Module):
         self.convs = torch.nn.ModuleList()
 
         for i in range(size_gnn):
-            self.convs.append(SAGEConv(hidden_channels, hidden_channels, aggr='mean'))
+            self.convs.append(SAGEConv(hidden_channels, hidden_channels, aggr='max'))
 
         self.act = F.leaky_relu
 

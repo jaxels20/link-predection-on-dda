@@ -38,6 +38,7 @@ def plot_all_metrics():
     
     concat_metrics = pd.concat([metrics_prebatch_meanaggr, metrics_postbatch_maxaggr, metrics_prebatch_gan_meanaggr])
     melted_metrics = pd.melt(concat_metrics, id_vars=['method'], value_vars=['Recall', 'AUC', 'F1', 'Accuracy', 'Precision'])
+
     # replace 0.0 with None
     melted_metrics['value'] = melted_metrics['value'].replace(0.0, None)
 
@@ -60,8 +61,6 @@ def plot_all_metrics():
         boxgap=0.5,
         template='simple_white'
     )
-    """for i in range(1, 5):
-        fig.add_vline(x=i-0.5, line_width=1, line_dash="dash", line_color="black")"""
-    fig.write_image('all_metrics_mixedaggr.pdf')
+    fig.write_image('all_metrics_all_methods.png')
 
 plot_all_metrics()
